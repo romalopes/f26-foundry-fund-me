@@ -1758,69 +1758,827 @@ Forking is a critical tool for building production-grade smart contracts that in
 
 # --#############################################
 
-Run a single test by name to save time:
+# Refactoring FundMe for Modularity and Better Testing
 
-```bash
-forge test --mt testPriceFeedVersionIsAccurate
+## Why Refactoring Is Needed
+
+The original `FundMe` implementation uses **hardcoded Chainlink price feed address**:
+
+```solidity id="a8d2kq"
+0x694AA1769357215DE4FAC081bf1f309aDC325306
+```
+
+This creates major issues:
+
+- ❌ Not portable across chains (Anvil, Sepolia, Mainnet, Arbitrum)
+- ❌ Requires manual edits in multiple places
+- ❌ High risk of human error in large codebases
+- ❌ Poor maintainability
+
+### Goal of Refactoring
+
+Make the contract:
+
+- Modular
+- Chain-agnostic
+- Easier to test
+- Easier to deploy
+
+---
+
+## Key Concept: Refactoring
+
+> Refactoring = changing code structure without changing functionality
+
+## The solution is to **refactor**: move the hardcoded address into the constructor so it's provided once at deployment time. This is a change in structure, not functionality.
+
+# 1. Refactor `FundMe.sol`
+
+## Step 1: Add Storage Variable
+
+```solidity id="v7m2qk"
+AggregatorV3Interface private s_priceFeed;
 ```
 
 ---
 
-## The Fix: Fork Testing
+## Step 2: Inject Dependency via Constructor
 
-Fork Sepolia so Anvil copies its live state — including the deployed `AggregatorV3` contract.
-
-### 1. Add to `.env`
-
-```bash
-SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY
+```solidity id="k3x9dp"
+constructor(address priceFeed) {
+    i_owner = msg.sender;
+    s_priceFeed = AggregatorV3Interface(priceFeed);
+}
 ```
-
-Make sure `.env` is in your `.gitignore`.
-
-### 2. Load the variable
-
-```bash
-source .env
-```
-
-### 3. Run the test with `--fork-url`
-
-```bash
-forge test --mt testPriceFeedVersionIsAccurate --fork-url $SEPOLIA_RPC_URL
-```
-
-Output:
-
-```
-[PASS] testPriceFeedVersionIsAccurate() (gas: 14118)
-Suite result: ok. 1 passed; 0 failed; 0 skipped
-```
-
-> **Note:** Forking makes API calls to Alchemy on every run — avoid running your entire test suite on a fork unless necessary.
 
 ---
 
-## Checking Coverage
+## Step 3: Replace Hardcoded Address in `getVersion`
 
-Use `forge coverage` to see which parts of your code are covered by tests:
+```solidity id="m9q2we"
+function getVersion() public view returns (uint256) {
+    AggregatorV3Interface priceFeed =
+        AggregatorV3Interface(s_priceFeed);
+
+    return priceFeed.version();
+}
+```
+
+---
+
+## Step 4: Use Price Feed in Funding Logic
+
+Later used inside:
+
+```solidity id="z8p4la"
+fund()
+```
+
+via:
+
+```solidity id="t6wq9n"
+getConversionRate(msg.value, s_priceFeed);
+```
+
+---
+
+# 2. Refactor `PriceConverter.sol`
+
+## Step 1: Remove Hardcoded Address
+
+❌ Remove this:
+
+```solidity id="c1r8xv"
+AggregatorV3Interface priceFeed =
+    AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306);
+```
+
+---
+
+## Step 2: Make `getPrice` Generic
+
+```solidity id="h4k8sp"
+function getPrice(
+    AggregatorV3Interface priceFeed
+) internal view returns (uint256) {
+    // implementation
+}
+```
+
+---
+
+## Step 3: Update `getConversionRate`
+
+```solidity id="p2v7zn"
+function getConversionRate(
+    uint256 ethAmount,
+    AggregatorV3Interface priceFeed
+) internal view returns (uint256) {
+
+    uint256 ethPrice = getPrice(priceFeed);
+    uint256 ethAmountInUsd =
+        (ethPrice * ethAmount) / 1000000000000000000;
+
+    return ethAmountInUsd;
+}
+```
+
+---
+
+# 3. Update `FundMe.sol` Usage
+
+Pass the stored price feed:
+
+```solidity id="r7k2ax"
+getConversionRate(msg.value, s_priceFeed);
+```
+
+---
+
+# 4. Fix Missing Constructor Arguments
+
+After refactoring, multiple places break:
+
+### Problem Areas
+
+- `DeployFundMe.s.sol`
+- `FundMe.t.sol`
+
+Both now need a `priceFeed` argument.
+
+---
+
+## Temporary Fix (Hardcoded Address)
+
+```solidity id="u9k3we"
+0x694AA1769357215DE4FAC081bf1f309aDC325306
+```
+
+---
+
+# 5. Improve Deployment Script
+
+## Updated `DeployFundMe.s.sol`
+
+```solidity id="d8p1qz"
+function run() external returns (FundMe) {
+    vm.startBroadcast();
+
+    FundMe fundMe =
+        new FundMe(0x694AA1769357215DE4FAC081bf1f309aDC325306);
+
+    vm.stopBroadcast();
+
+    return fundMe;
+}
+```
+
+### Key Improvement
+
+- Deployment now returns the deployed contract instance
+
+---
+
+# 6. Refactor Tests for Consistency
+
+## Step 1: Import Deploy Script
+
+```solidity id="x3n9qp"
+import {DeployFundMe} from "../script/DeployFundMe.s.sol";
+```
+
+---
+
+## Step 2: Add State Variable
+
+```solidity id="l2m8we"
+DeployFundMe deployFundMe;
+FundMe fundMe;
+```
+
+---
+
+## Step 3: Use Deployment Script in `setUp`
+
+```solidity id="k8q1pa"
+function setUp() external {
+    deployFundMe = new DeployFundMe();
+    fundMe = deployFundMe.run();
+}
+```
+
+> **Note:** `vm.startBroadcast` uses the address that calls the test contract, or a provided address/private key, as the sender. Read more [here](https://book.getfoundry.sh/cheatcodes/start-broadcast).
+
+---
+
+# 7. Test Failure After Refactor
+
+After refactoring, this test fails:
+
+```solidity id="n4p2xz"
+function testOwnerIsMsgSender() public {
+    assertEq(fundMe.i_owner(), msg.sender);
+}
+```
+
+---
+
+## Why It Fails
+
+Because deployment now happens via:
+
+```solidity id="v1x7qa"
+deployFundMe.run()
+```
+
+And inside scripts:
+
+```solidity id="b6k3zp"
+vm.startBroadcast();
+```
+
+### Important Rule:
+
+- `vm.startBroadcast()` changes the `msg.sender`
+- It becomes either:
+  - The broadcaster private key address
+  - Or the calling context of the script
+
+So ownership is no longer tied to the test contract.
+
+---
+
+# 8. Fix the Ownership Test
+
+Correct assertion:
+
+```solidity id="t9k1lm"
+function testOwnerIsMsgSender() public {
+    assertEq(fundMe.i_owner(), msg.sender);
+}
+```
+
+---
+
+# 9. Verify Everything with Forked Tests
+
+Run:
+
+```bash id="q7v3zn"
+forge test --fork-url $SEPOLIA_RPC_URL
+```
+
+Expected:
+
+```text id="m2x8qp"
+[PASS] all tests
+```
+
+---
+
+# Key Takeaways
+
+## 1. Hardcoding Is Bad Design
+
+Avoid:
+
+```solidity id="h1q9we"
+address constant = ...
+```
+
+Use:
+
+```solidity id="c7v2la"
+constructor(address priceFeed)
+```
+
+---
+
+## 2. Dependency Injection Pattern
+
+Contracts become:
+
+- Flexible
+- Reusable
+- Chain-independent
+
+---
+
+## 3. Scripts Must Match Contract Interface
+
+If constructor changes:
+
+```solidity id="z2p8qa"
+new FundMe(priceFeed);
+```
+
+must be updated everywhere.
+
+---
+
+## 4. Tests Should Mirror Deployment Flow
+
+- Tests now reuse deployment script
+- Ensures real-world consistency
+
+---
+
+## 5. `vm.startBroadcast()` Changes Ownership Context
+
+- Script execution ≠ test execution
+- `msg.sender` changes depending on broadcast context
+
+---
+
+# Final Summary
+
+This refactor transforms `FundMe` from a rigid, chain-specific contract into a **modular and production-ready system** by:
+
+- Removing hardcoded addresses
+- Injecting dependencies via constructor
+- Aligning scripts, tests, and deployment logic
+- Ensuring compatibility with multiple chains
+- Improving maintainability and test reliability
+
+This is a key step toward writing professional-grade smart contracts using Foundry.
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# Deploy a Mock Price Feed - Testing Locally
+
+## Overview
+
+In the previous refactoring, we removed the need to hardcode the Chainlink price feed address throughout the codebase. However, the project still depended on Sepolia for testing.
+
+A better approach is to make the project fully testable on a local blockchain such as Anvil.
+
+To achieve this, we introduce:
+
+- A `HelperConfig` contract
+- Chain-specific configurations
+- Mock deployments for local testing
+- Dynamic network detection using `block.chainid`
+
+This pattern removes hardcoded addresses and enables seamless deployment and testing across multiple networks.
+
+---
+
+# Why Use Mocks?
+
+Testing against live networks has several drawbacks:
+
+- Requires RPC access
+- Slower execution
+- External dependency failures
+- Hardcoded addresses
+- Forking requirements
+
+Mock contracts solve these issues by simulating real contract behavior locally.
+
+Benefits:
+
+- Fast local tests
+- No RPC dependency
+- No blockchain forking required
+- Easier refactoring
+- Better CI/CD compatibility
+
+---
+
+# Creating HelperConfig
+
+Create a new file:
+
+```text
+script/
+└── HelperConfig.s.sol
+```
+
+Initial structure:
+
+```solidity
+// SPDX-License-Identifier: MIT
+
+pragma solidity 0.8.19;
+
+import {Script} from "forge-std/Script.sol";
+
+contract HelperConfig {
+    // If we are on a local Anvil, deploy mocks
+    // Otherwise use existing network addresses
+}
+```
+
+---
+
+# Network Configuration Pattern
+
+Instead of storing individual variables for each network, use a struct.
+
+```solidity
+struct NetworkConfig {
+    address priceFeed;
+}
+```
+
+### Why use a struct?
+
+Today we only need:
+
+```solidity
+address priceFeed;
+```
+
+Later we might need:
+
+```solidity
+address priceFeed;
+address vrfCoordinator;
+bytes32 gasLane;
+uint64 subscriptionId;
+```
+
+Using a struct makes the configuration scalable.
+
+---
+
+# Sepolia Configuration
+
+```solidity
+function getSepoliaEthConfig()
+    public
+    pure
+    returns (NetworkConfig memory)
+{
+    NetworkConfig memory sepoliaConfig = NetworkConfig({
+        priceFeed: 0x694AA1769357215DE4FAC081bf1f309aDC325306
+    });
+
+    return sepoliaConfig;
+}
+```
+
+This returns the Chainlink ETH/USD Price Feed address on Sepolia.
+
+---
+
+# Anvil Configuration
+
+Placeholder for local testing:
+
+```solidity
+function getAnvilEthConfig()
+    public
+    pure
+    returns (NetworkConfig memory)
+{
+
+}
+```
+
+Later this function will deploy or return a mock price feed.
+
+---
+
+# Active Network Configuration
+
+Add a state variable:
+
+```solidity
+NetworkConfig public activeNetworkConfig;
+```
+
+Complete setup:
+
+```solidity
+NetworkConfig public activeNetworkConfig;
+
+struct NetworkConfig {
+    address priceFeed;
+}
+
+constructor() {
+    if (block.chainid == 11155111) {
+        activeNetworkConfig = getSepoliaEthConfig();
+    } else {
+        activeNetworkConfig = getAnvilEthConfig();
+    }
+}
+```
+
+---
+
+# Understanding block.chainid
+
+`block.chainid` returns the current blockchain's unique identifier.
+
+Examples:
+
+| Network          | Chain ID |
+| ---------------- | -------- |
+| Ethereum Mainnet | 1        |
+| Sepolia          | 11155111 |
+| Polygon          | 137      |
+| Arbitrum One     | 42161    |
+| Optimism         | 10       |
+| Local Anvil      | 31337    |
+
+Useful resources:
+
+- chainlist.org
+- Chainlink Price Feed Contract Addresses
+
+---
+
+# Updating DeployFundMe
+
+Import HelperConfig:
+
+```solidity
+import {HelperConfig} from "./HelperConfig.s.sol";
+```
+
+Inside `run()` add:
+
+```solidity
+HelperConfig helperConfig = new HelperConfig();
+
+address ethUsdPriceFeed =
+    helperConfig.activeNetworkConfig();
+```
+
+Full flow:
+
+```solidity
+function run() external {
+
+    HelperConfig helperConfig = new HelperConfig();
+
+    address ethUsdPriceFeed =
+        helperConfig.activeNetworkConfig();
+
+    vm.startBroadcast();
+
+    // Deploy contracts here
+
+    vm.stopBroadcast();
+}
+```
+
+---
+
+# Important Deployment Detail
+
+The HelperConfig contract is instantiated **before**:
+
+```solidity
+vm.startBroadcast();
+```
+
+This means:
+
+```solidity
+HelperConfig helperConfig = new HelperConfig();
+```
+
+is not actually deployed on-chain.
+
+Only transactions executed between:
+
+```solidity
+vm.startBroadcast();
+```
+
+and
+
+```solidity
+vm.stopBroadcast();
+```
+
+become real blockchain transactions.
+
+This keeps deployment scripts lightweight and efficient.
+
+---
+
+# Running Tests
+
+Verify everything still works:
 
 ```bash
-forge coverage --fork-url $SEPOLIA_RPC_URL
+forge test --fork-url $SEPOLIA_RPC_URL
 ```
 
-Example output:
+Expected result:
 
-```
-| File                      | % Lines       | % Statements  | % Branches  | % Funcs      |
-| ------------------------- | ------------- | ------------- | ----------- | ------------ |
-| script/DeployFundMe.s.sol | 0.00% (0/3)   | 0.00% (0/3)   | 100% (0/0)  | 0.00% (0/1)  |
-| src/FundMe.sol            | 21.43% (3/14) | 25.00% (5/20) | 0.00% (0/6) | 33.33% (2/6) |
-| src/PriceConverter.sol    | 0.00% (0/6)   | 0.00% (0/11)  | 100% (0/0)  | 0.00% (0/2)  |
-| Total                     | 13.04% (3/23) | 14.71% (5/34) | 0.00% (0/6) | 22.22% (2/9) |
+```text
+All tests passing
 ```
 
-13% total coverage is far too low — the goal in upcoming lessons is to dramatically increase this. See the [forge coverage docs](https://book.getfoundry.sh/reference/forge/forge-coverage) for all options.
+---
+
+# Supporting Additional Chains
+
+Adding another blockchain is straightforward.
+
+Copy:
+
+```solidity
+function getSepoliaEthConfig()
+```
+
+Create a new version:
+
+```solidity
+function getPolygonConfig()
+```
+
+or
+
+```solidity
+function getArbitrumConfig()
+```
+
+Example:
+
+```solidity
+function getArbitrumConfig()
+    public
+    pure
+    returns (NetworkConfig memory)
+{
+    NetworkConfig memory config = NetworkConfig({
+        priceFeed: ARBITRUM_PRICE_FEED_ADDRESS
+    });
+
+    return config;
+}
+```
+
+Then update the constructor:
+
+```solidity
+constructor() {
+    if (block.chainid == 11155111) {
+        activeNetworkConfig = getSepoliaEthConfig();
+    } else if (block.chainid == 42161) {
+        activeNetworkConfig = getArbitrumConfig();
+    } else {
+        activeNetworkConfig = getAnvilEthConfig();
+    }
+}
+```
+
+---
+
+# Benefits of the HelperConfig Pattern
+
+Before:
+
+```solidity
+address constant PRICE_FEED =
+    0x694AA1769357215DE4FAC081bf1f309aDC325306;
+```
+
+Problems:
+
+- Hardcoded addresses
+- Difficult migrations
+- Poor portability
+- Test complexity
+
+After:
+
+```solidity
+activeNetworkConfig.priceFeed
+```
+
+Benefits:
+
+- Multi-chain deployments
+- Cleaner code
+- Easier testing
+- Easier maintenance
+- Better scalability
+
+---
+
+# Mainnet Price Feed Version Change
+
+Chainlink upgraded the Mainnet ETH/USD price feed.
+
+Tests that assume a fixed version may fail.
+
+Update your test:
+
+```solidity
+function testPriceFeedVersionIsAccurate() public {
+    if (block.chainid == 11155111) {
+        uint256 version = fundMe.getVersion();
+        assertEq(version, 4);
+    } else if (block.chainid == 1) {
+        uint256 version = fundMe.getVersion();
+        assertEq(version, 6);
+    }
+}
+```
+
+Expected versions:
+
+| Network | Version |
+| ------- | ------- |
+| Sepolia | 4       |
+| Mainnet | 6       |
+
+---
+
+# Key Concepts Learned
+
+## Mock Contracts
+
+Contracts that simulate external dependencies for testing.
+
+---
+
+## HelperConfig Pattern
+
+Centralizes chain-specific configuration.
+
+---
+
+## block.chainid
+
+Allows runtime detection of the current blockchain.
+
+---
+
+## Multi-Chain Deployments
+
+Same codebase can deploy across:
+
+- Ethereum
+- Sepolia
+- Polygon
+- Arbitrum
+- Optimism
+- Local Anvil
+
+---
+
+## Configuration Management
+
+Store network-specific settings in structs instead of hardcoded constants.
+
+---
+
+# Quick Reference
+
+### Create HelperConfig
+
+```solidity
+contract HelperConfig {
+    NetworkConfig public activeNetworkConfig;
+}
+```
+
+### Select Network
+
+```solidity
+if (block.chainid == 11155111)
+```
+
+### Access Price Feed
+
+```solidity
+activeNetworkConfig.priceFeed
+```
+
+### Run Tests
+
+```bash
+forge test --fork-url $SEPOLIA_RPC_URL
+```
+
+---
+
+# Takeaway
+
+The HelperConfig pattern is a foundational Solidity development technique that eliminates hardcoded addresses and enables truly portable deployments.
+
+By combining:
+
+- `block.chainid`
+- network-specific configs
+- mocks
+- deployment scripts
+
+you can run the same codebase across local, testnet, and mainnet environments with minimal changes, greatly improving maintainability and testing reliability.
 
 # ------------------------------------------------
 
@@ -1830,21 +2588,318 @@ Example output:
 
 # --#############################################
 
-# ------------------------------------------------
+# Refactoring the Mock Smart Contract - Solving the Anvil Problem
 
+## Overview
+
+When deploying to Sepolia, we can directly use a real Chainlink price feed address.
+
+On Anvil, the Chainlink `AggregatorV3` contract doesn't exist. The solution is to deploy a **mock contract** — a simplified contract that simulates the behavior of the real one — and point `HelperConfig` to it.
+
+This allows:
+
+- Fully local testing
+- No dependency on testnets
+- Deterministic behavior
+- Faster development cycles
+
+---
+
+# What is a Mock Contract?
+
+A **mock contract** is a simplified version of a real contract used for testing purposes.
+
+It:
+
+- Simulates external dependencies
+- Returns predictable values
+- Replaces live blockchain services locally
+
+In this case, we mock:
+
+```text
+Chainlink AggregatorV3Interface (Price Feed)
 ```
 
+---
+
+# Project Structure Update
+
+Create the mock contract:
+
+```bash id="q9d2xa"
+mkdir test/mocks
+touch test/mocks/MockV3Aggregator.sol
 ```
 
-# --#############################################
+Create `test/mocks/MockV3Aggregator.sol` and copy the contents from the [Cyfrin repository](https://github.com/Cyfrin/foundry-fund-me-f23/blob/main/test/mock/MockV3Aggregator.sol).
 
-# ------------------------------------------------
+---
 
+# MockV3Aggregator Contract
+
+Copy the full Chainlink mock implementation into:
+
+```text id="m0v8pq"
+test/mocks/MockV3Aggregator.sol
 ```
 
+This contract simulates:
+
+- ETH/USD price feed
+- Decimals
+- Latest round data
+
+---
+
+# Update HelperConfig
+
+## 1. Import Required Dependencies
+
+```solidity id="a71kq2"
+import {Script} from "forge-std/Script.sol";
+import {MockV3Aggregator} from "../test/mocks/MockV3Aggregator.sol";
+
+contract HelperConfig is Script {
 ```
 
-# --#############################################
+---
+
+## 2. Inherit from Script
+
+This gives access to:
+
+- `vm.startBroadcast()`
+- `vm.stopBroadcast()`
+
+```solidity id="c8m2xz"
+contract HelperConfig is Script {
+}
+```
+
+---
+
+## 3. Add Mock State Variable
+
+```solidity id="z91p0v"
+MockV3Aggregator mockPriceFeed;
+```
+
+---
+
+# 4. Implement getAnvilEthConfig
+
+This function deploys a mock price feed locally and returns its address.
+
+```solidity id="v3n8qs"
+function getAnvilEthConfig()
+    public
+    returns (NetworkConfig memory)
+{
+    vm.startBroadcast();
+
+    mockPriceFeed = new MockV3Aggregator(
+        8,        // decimals
+        2000e8    // initial ETH/USD price
+    );
+
+    vm.stopBroadcast();
+
+    NetworkConfig memory anvilConfig = NetworkConfig({
+        priceFeed: address(mockPriceFeed)
+    });
+
+    return anvilConfig;
+}
+```
+
+`MockV3Aggregator` takes two constructor arguments:
+
+- `8` — decimals (matching Chainlink's ETH/USD feed)
+- `2000e8` — initial price ($2000 with 8 decimal places)
+
+---
+
+# 5. How It Works
+
+When running on Anvil:
+
+```solidity id="k3p8lm"
+if (block.chainid != 11155111) {
+    activeNetworkConfig = getAnvilEthConfig();
+}
+```
+
+Flow:
+
+1. Detect local chain (Anvil)
+2. Deploy MockV3Aggregator
+3. Capture deployed address
+4. Return it as priceFeed
+5. Use it in FundMe contract
+
+forge test (no --fork-url)
+└── setUp() calls DeployFundMe.run()
+└── HelperConfig constructor checks block.chainid
+└── chainid == 31337 (Anvil) → getAnvilEthConfig()
+└── Deploys MockV3Aggregator → returns its address
+└── FundMe deployed with mock address ✅
+
+---
+
+# 6. Why vm.startBroadcast is Needed
+
+Mock deployment must simulate real transactions.
+
+```solidity id="h1q9we"
+vm.startBroadcast();
+```
+
+This ensures:
+
+- The mock contract is actually deployed
+- It behaves like a real blockchain deployment
+- The address is valid for subsequent calls
+
+---
+
+# 7. Final HelperConfig Flow
+
+```solidity id="f7k2as"
+constructor() {
+    if (block.chainid == 11155111) {
+        activeNetworkConfig = getSepoliaEthConfig();
+    } else {
+        activeNetworkConfig = getAnvilEthConfig();
+    }
+}
+```
+
+---
+
+# 8. Resulting Behavior
+
+| Network | Behavior                       |
+| ------- | ------------------------------ |
+| Sepolia | Uses real Chainlink price feed |
+| Anvil   | Deploys MockV3Aggregator       |
+
+---
+
+# 9. Mock Configuration Values
+
+```solidity id="p2m8nx"
+new MockV3Aggregator(8, 2000e8);
+```
+
+| Parameter | Meaning              |
+| --------- | -------------------- |
+| 8         | Decimals             |
+| 2000e8    | ETH/USD price = 2000 |
+
+---
+
+# 10. Key Benefits
+
+## Before
+
+- External dependency required
+- No local testing
+- Hardcoded addresses
+- Network coupling
+
+## After
+
+- Fully local testing
+- No external APIs needed
+- Deterministic price feed
+- Easy CI integration
+
+---
+
+# 11. Architecture Pattern
+
+This introduces a standard Solidity testing pattern:
+
+### HelperConfig + Mocks
+
+- HelperConfig → selects network config
+- MockV3Aggregator → simulates external oracle
+- block.chainid → runtime switching
+
+---
+
+# 12. Testing Flow
+
+### Local (Anvil)
+
+```bash id="t8q3mn"
+forge test
+```
+
+Steps:
+
+1. Detect Anvil chain
+2. Deploy mock
+3. Use mock price feed
+4. Run tests locally
+
+---
+
+### Testnet (Sepolia)
+
+```bash id="r5v9kd"
+forge test --fork-url $SEPOLIA_RPC_URL
+```
+
+Steps:
+
+1. Detect Sepolia
+2. Use real Chainlink feed
+3. Run tests against forked chain
+
+---
+
+# 13. Key Concepts Learned
+
+## Mock Contract
+
+Simulates external dependencies for controlled testing.
+
+---
+
+## HelperConfig Extension
+
+Now includes deployment logic, not just configuration.
+
+---
+
+## Local Blockchain Testing
+
+Anvil enables full blockchain simulation without external dependencies.
+
+---
+
+## Dynamic Deployment Logic
+
+Contracts can adapt based on:
+
+```solidity id="c9p1zl"
+block.chainid
+```
+
+---
+
+# 14. Summary
+
+By introducing mock contracts into HelperConfig:
+
+- We eliminated dependency on real networks for testing
+- We enabled deterministic local development
+- We improved reliability of tests
+- We established a scalable multi-chain testing architecture
+
+This pattern is essential for professional Solidity development workflows.
 
 # ------------------------------------------------
 

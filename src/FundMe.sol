@@ -7,6 +7,7 @@ pragma solidity ^0.8.24;
 
 // imports
 import {PriceConverter} from "./PriceConverter.sol";
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
 // errors
 error FundMeNotOwner();
@@ -33,13 +34,16 @@ contract FundMe {
      * Aggregator: BTC/USD
      * Address: 0x694AA1769357215DE4FAC081bf1f309aDC325306
      */
-    constructor() {
+    constructor(AggregatorV3Interface priceFeed) {
         i_owner = msg.sender;
+        s_priceFeed = priceFeed;
     }
 
     // Type Declarations
     using PriceConverter for uint256;
 
+    // State Variables
+    AggregatorV3Interface private immutable s_priceFeed;
     uint256 public unlockTime = block.timestamp + 1 days;
     uint256 public constant MINIMUM_USD = 5e18;
     address[] public funders;
@@ -63,7 +67,7 @@ contract FundMe {
         // set minimum $ sent
         // require(msg.value >= 1e18, "didn't send enough eht"); // 1 eth
         // require(PriceConverter.getConversionRate(msg.value) >= minimumUSD, "didn't send enough eht"); // 1 eth
-        require(msg.value.getConversionRate() >= MINIMUM_USD, "didn't send enough eht"); // 1 eth
+        require(msg.value.getConversionRate(s_priceFeed) >= MINIMUM_USD, "didn't send enough eht"); // 1 eth
         funders.push(msg.sender);
         addressToAmountFunded[msg.sender] += msg.value;
         addressToContributionCount[msg.sender] += 1;
@@ -96,9 +100,13 @@ contract FundMe {
     }
 
     function getConversionRate(uint256 amountEth) public view returns (uint256) {
-        uint256 ethPrice = PriceConverter.getPrice();
+        uint256 ethPrice = PriceConverter.getPrice(s_priceFeed);
         uint256 amountUsd = (amountEth * ethPrice) / 1e18;
         return amountUsd;
+    }
+
+    function getPrice() public view returns (uint256) {
+        return PriceConverter.getPrice(s_priceFeed);
     }
 
     function contributionCount(address funder) public view returns (uint256) {
@@ -113,6 +121,18 @@ contract FundMe {
     function callAmountTo(address payable recipient, uint256 amount) public {
         (bool success,) = recipient.call{value: amount}("");
         require(success, "Call failed");
+    }
+
+    function getFunder(uint256 index) public view returns (address) {
+        return funders[index];
+    }
+
+    function getVersion() public view returns (uint256) {
+        return PriceConverter.getVersion(s_priceFeed);
+    }
+
+    function getDecimals() public view returns (uint8) {
+        return PriceConverter.getDecimals(s_priceFeed);
     }
 
     function getBalance() public view returns (uint256) {

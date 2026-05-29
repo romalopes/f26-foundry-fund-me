@@ -3,13 +3,28 @@ pragma solidity ^0.8.24;
 
 import {Test, console} from "forge-std/Test.sol";
 import {FundMe} from "../src/FundMe.sol";
+import {DeployFundMe} from "../script/DeployFundMe.s.sol";
 import {PriceConverter} from "../src/PriceConverter.sol";
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
 contract FundMeTest is Test {
+    // Functions Order:
+    //// constructor
+    //// receive
+    //// fallback
+    //// external
+    //// public
+    //// internal
+    //// private
+    //// view / pure
     FundMe public fundMe;
+    DeployFundMe public deployFundMe;
+    AggregatorV3Interface private s_priceFeed;
 
     function setUp() public {
-        fundMe = new FundMe();
+        deployFundMe = new DeployFundMe();
+        fundMe = deployFundMe.run();
+        // fundMe = new FundMe();
     }
 
     // function test_Fund() public {
@@ -29,22 +44,27 @@ contract FundMeTest is Test {
     }
 
     function testOwnerIsMsgSender() public view {
-        assertEq(fundMe.getOwner(), address(this));
+        console.log("testOwnerIsMsgSender");
+        console.log(msg.sender);
+        console.log(address(this));
+        // assertEq(fundMe.getOwner(), address(this));
+        assertEq(fundMe.getOwner(), msg.sender);
     }
 
     function testPriceFeedVersionIsAccurate() public view {
         console.log("testPriceFeedVersionIsAccurate");
-        uint256 version = PriceConverter.getVersion();
+        uint256 version = fundMe.getVersion();
         assertEq(version, 4);
     }
 
     function testPriceFeedDecimalsAreAccurate() public view {
-        uint8 decimals = PriceConverter.getDecimals();
+        uint8 decimals = fundMe.getDecimals();
         assertEq(decimals, 8);
     }
 
     function testPriceFeedPriceIsAccurate() public view {
-        uint256 price = PriceConverter.getPrice();
+        uint256 price = fundMe.getPrice();
+        console.log("Price: ", price);
         assert(price > 198760000000000000000 && price < 3000000000000000000000);
     }
 }

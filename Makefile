@@ -1,6 +1,13 @@
 include .env
 
 PRIVATE_KEY ?= BRAVE_METAMASK_PRIVATE_KEY_1
+NETWORK ?= ALCHEMY_ETH_SEPOLIA
+SIMPLE_STORAGE_CONTRACT_ADDRESS ?= $($NETWORK)_SIMPLE_STORAGE_CONTRACT_ADDRESS
+
+echo_params:
+	@echo "PRIVATE_KEY: $(PRIVATE_KEY)"
+	@echo "NETWORK: $(NETWORK)"
+	@echo "SIMPLE_STORAGE_CONTRACT_ADDRESS: $(SIMPLE_STORAGE_CONTRACT_ADDRESS)"
 
 build:
 	forge build
@@ -318,3 +325,13 @@ format:
 
 cast:
 	cast --to-base $(hex) dec
+
+coverage:
+	 forge coverage --fork-url $(ALCHEMY_ETH_SEPOLIA_RPC_URL)
+
+test-fork-url-testPriceFeedVersionIsAccurate:
+	forge test --mt testPriceFeedVersionIsAccurate --fork-url $(ALCHEMY_ETH_SEPOLIA_RPC_URL)
+
+
+test-fork-url-generic: echo_params
+	forge test -vvv --fork-url $($(NETWORK)_RPC_URL)
