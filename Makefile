@@ -1,7 +1,8 @@
 include .env
 
 PRIVATE_KEY ?= BRAVE_METAMASK_PRIVATE_KEY_1
-NETWORK ?= ALCHEMY_ETH_SEPOLIA
+# NETWORK ?= ALCHEMY_ETH_SEPOLIA
+NETWORK ?= ANVIL
 SIMPLE_STORAGE_CONTRACT_ADDRESS ?= $(NETWORK)_SIMPLE_STORAGE_CONTRACT_ADDRESS
 
 echo_params:
@@ -329,12 +330,15 @@ cast:
 coverage:
 	 forge coverage --fork-url $(ALCHEMY_ETH_SEPOLIA_RPC_URL)
 
-test-fork-url-testFundFailsWithoutEnoughETH:
-	forge test --mt testFundFailsWithoutEnoughETH --fork-url $(ALCHEMY_ETH_SEPOLIA_RPC_URL)
-
 test-mt:
-	forge test --mt $(TEST_METHOD) --fork-url $($(NETWORK)_RPC_URL) -vv
+	forge test --mt $(TEST_METHOD) --fork-url $($(NETWORK)_RPC_URL) -vvvv
 
 
-test-fork-url-generic: echo_params
+test-fork-url: echo_params
 	forge test -vvv --fork-url $($(NETWORK)_RPC_URL)
+
+snapshot:
+	forge snapshot --fork-url $($(NETWORK)_RPC_URL)
+
+snapshot-method:
+	forge snapshot --mt $(TEST_METHOD) --fork-url $($(NETWORK)_RPC_URL) -vv

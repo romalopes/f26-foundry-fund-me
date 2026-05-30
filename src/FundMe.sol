@@ -6,6 +6,7 @@
 pragma solidity ^0.8.24;
 
 // imports
+import {console} from "forge-std/console.sol";
 import {PriceConverter} from "./PriceConverter.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
@@ -49,7 +50,7 @@ contract FundMe {
     address[] private s_funders;
     mapping(address => uint256) private s_addressToAmountFunded;
     mapping(address => uint256) private s_addressToContributionCount;
-    address private immutable i_owner;
+    address public immutable i_owner;
 
     // Events
     event FundReceived(address indexed funder, uint256 amount);
@@ -77,7 +78,10 @@ contract FundMe {
     }
 
     function withdraw() public onlyOwner {
-        // require(msg.sender == owner, "Only owner can withdraw the money.");
+        console.log("withdraw");
+        console.log("withdraw msg.sender: ", msg.sender);
+        console.log("withdraw i_owner: ", i_owner);
+        // require(msg.sender == i_owner, "Only owner can withdraw the money.");
         for (uint256 funderIndex = 0; funderIndex < s_funders.length; funderIndex++) {
             address funder = s_funders[funderIndex];
             s_addressToAmountFunded[funder] = 0;
@@ -99,6 +103,19 @@ contract FundMe {
 
     function timedWithdraw() public onlyOwner onlyAfter(unlockTime) {
         withdraw();
+    }
+
+    function cheaperWithdraw() public onlyOwner {
+        uint256 fundersLength = s_funders.length; // cache length in memory ✅
+
+        for (uint256 funderIndex = 0; funderIndex < fundersLength; funderIndex++) {
+            address funder = s_funders[funderIndex];
+            s_addressToAmountFunded[funder] = 0;
+        }
+        s_funders = new address[](0);
+
+        (bool callSuccess,) = payable(msg.sender).call{value: address(this).balance}("");
+        require(callSuccess, "Call failed");
     }
 
     function getConversionRate(uint256 amountEth) public view returns (uint256) {
@@ -125,7 +142,7 @@ contract FundMe {
         require(success, "Call failed");
     }
 
-    function getFunder(uint256 index) public view returns (address) {
+    function getFunder(uint256 index) external view returns (address) {
         return s_funders[index];
     }
 
@@ -141,14 +158,14 @@ contract FundMe {
         return address(this).balance;
     }
 
-    function getAddressToAmountFunded(address funder) public view returns (uint256) {
+    function getAddressToAmountFunded(address funder) external view returns (uint256) {
         return s_addressToAmountFunded[funder];
     }
 
     //Modifiers
     modifier onlyOwner() {
         // require(msg.sender == i_owner, "Sender is not owner");
-        if (msg.sender == i_owner) {
+        if (msg.sender != i_owner) {
             revert FundMeNotOwner();
         }
         _;

@@ -3551,6 +3551,2487 @@ These cheatcodes form the foundation of nearly every professional Solidity testi
 
 # --#############################################
 
+# Adding More Test Coverage
+
+## Test: Funders Array is Updated
+
+```solidity
+function testAddsFunderToArrayOfFunders() public {
+    vm.startPrank(alice);
+    fundMe.fund{value: SEND_VALUE}();
+    vm.stopPrank();
+
+    address funder = fundMe.getFunder(0);
+    assertEq(funder, alice);
+}
+```
+
+> Each test starts with a fresh `setUp` — state does not carry over between tests.
+
+---
+
+## Test: Only Owner Can Withdraw
+
+```solidity
+function testOnlyOwnerCanWithdraw() public {
+    vm.prank(alice);
+    fundMe.fund{value: SEND_VALUE}();
+
+    vm.expectRevert();
+    vm.prank(alice);
+    fundMe.withdraw();
+}
+```
+
+> **Important:** Cheatcodes affect transactions, not other cheatcodes. `vm.expectRevert()` skips over `vm.prank(alice)` and applies to the `withdraw()` call.
+
+---
+
+## The `funded` Modifier
+
+Avoid copy-pasting the fund setup across tests by extracting it into a modifier:
+
+```solidity
+modifier funded() {
+    vm.prank(alice);
+    fundMe.fund{value: SEND_VALUE}();
+    assert(address(fundMe).balance > 0);
+    _;
+}
+```
+
+Refactored test using the modifier:
+
+```solidity
+function testOnlyOwnerCanWithdraw() public funded {
+    vm.expectRevert();
+    fundMe.withdraw();
+}
+```
+
+---
+
+## Add a `getOwner()` Getter
+
+Make `i_owner` private and add a getter in `FundMe.sol`:
+
+```solidity
+function getOwner() public view returns (address) {
+    return i_owner;
+}
+```
+
+---
+
+## The AAA Pattern (Arrange → Act → Assert)
+
+A standard methodology for structuring tests:
+
+| Stage       | What it does                            |
+| ----------- | --------------------------------------- |
+| **Arrange** | Set up initial state and variables      |
+| **Act**     | Execute the function being tested       |
+| **Assert**  | Verify the outcome matches expectations |
+
+---
+
+## Test: Withdraw from a Single Funder
+
+```solidity
+function testWithdrawFromASingleFunder() public funded {
+    // Arrange
+    uint256 startingFundMeBalance = address(fundMe).balance;
+    uint256 startingOwnerBalance = fundMe.getOwner().balance;
+
+    // Act
+    vm.startPrank(fundMe.getOwner());
+    fundMe.withdraw();
+    vm.stopPrank();
+
+    // Assert
+    uint256 endingFundMeBalance = address(fundMe).balance;
+    uint256 endingOwnerBalance = fundMe.getOwner().balance;
+    assertEq(endingFundMeBalance, 0);
+    assertEq(startingFundMeBalance + startingOwnerBalance, endingOwnerBalance);
+}
+```
+
+---
+
+## Test: Withdraw from Multiple Funders
+
+Uses `hoax` — a Foundry cheatcode that combines `vm.deal` + `vm.prank` in one call:
+
+```solidity
+function testWithdrawFromMultipleFunders() public funded {
+    // Arrange
+    uint160 numberOfFunders = 10;
+    uint160 startingFunderIndex = 1; // avoid address(0)
+    for (uint160 i = startingFunderIndex; i < numberOfFunders + startingFunderIndex; i++) {
+        hoax(address(i), SEND_VALUE); // prank + deal
+        fundMe.fund{value: SEND_VALUE}();
+    }
+
+    uint256 startingFundMeBalance = address(fundMe).balance;
+    uint256 startingOwnerBalance = fundMe.getOwner().balance;
+
+    // Act
+    vm.startPrank(fundMe.getOwner());
+    fundMe.withdraw();
+    vm.stopPrank();
+
+    // Assert
+    assert(address(fundMe).balance == 0);
+    assert(startingFundMeBalance + startingOwnerBalance == fundMe.getOwner().balance);
+    assert((numberOfFunders + 1) * SEND_VALUE == fundMe.getOwner().balance - startingOwnerBalance);
+}
+```
+
+**Why `uint160` for the index?** Addresses are 20-byte values and `uint160` converts directly to `address` without an explicit cast. `+1` in the last assertion accounts for `alice` from the `funded` modifier.
+
+> **Never use `address(0)` for pranking** — it has special EVM treatment.
+
+---
+
+## Run Tests
+
+```bash
+forge test --mt testAddsFunderToArrayOfFunders
+forge test --mt testOnlyOwnerCanWithdraw
+forge test --mt testWithdrawFromASingleFunder
+forge test --mt testWithdrawFromMultipleFunders
+forge test          # run all
+forge coverage      # check coverage %
+```
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# FundMe Testing - Expanding Coverage with Foundry Cheatcodes
+
+## Overview
+
+In this section, we continue improving the **FundMe** test suite by verifying:
+
+- Funders are correctly stored in the array
+- Only the owner can withdraw funds
+- Withdrawals work for both single and multiple funders
+- Test structure is improved using modifiers and AAA pattern
+
+We heavily rely on Foundry cheatcodes to simulate users and control EVM state.
+
+---
+
+# 1. Testing the Funders Array
+
+We first verify that `msg.sender` is correctly stored in the `s_funders` array.
+
+## Test: Adds Funder to Array
+
+```solidity id="f1t8qz"
+function testAddsFunderToArrayOfFunders() public {
+    vm.startPrank(alice);
+    fundMe.fund{value: SEND_VALUE}();
+    vm.stopPrank();
+    address funder = fundMe.getFunder(0);
+    assertEq(funder, alice);
+}
+```
+
+### Explanation
+
+- `alice` funds the contract using `vm.startPrank`
+- We read the first funder using `getFunder(0)`
+- We verify it matches `alice`
+
+---
+
+## Important Note
+
+> Each test starts with a fresh `setUp` — state does not carry over between tests.
+
+---
+
+# 2. Testing Access Control (Only Owner Can Withdraw)
+
+We ensure that non-owners cannot withdraw funds.
+
+## Test: Only Owner Can Withdraw
+
+```solidity id="k9v3sa"
+function testOnlyOwnerCanWithdraw() public {
+    vm.prank(alice);
+    fundMe.fund{value: SEND_VALUE}();
+
+    vm.expectRevert();
+
+    vm.prank(alice);
+    fundMe.withdraw();
+}
+```
+
+---
+
+## Cheatcode Behavior
+
+```text id="e7c2lm"
+vm.expectRevert() applies to the next CALL, not the prank
+```
+
+Order of cheatcodes does NOT interfere with each other.
+
+---
+
+# 3. Refactoring with Modifiers
+
+To avoid repetition, we create a reusable setup modifier.
+
+## Modifier: funded
+
+```solidity id="m4q7zp"
+modifier funded() {
+    vm.prank(alice);
+    fundMe.fund{value: SEND_VALUE}();
+
+    assert(address(fundMe).balance > 0);
+
+    _;
+}
+```
+
+### Purpose
+
+- Funds contract with `alice`
+- Ensures funding succeeded
+- Reusable across multiple tests
+
+---
+
+## Refactored Test
+
+```solidity id="r8d2kq"
+function testOnlyOwnerCanWithdraw() public funded {
+    vm.expectRevert();
+    fundMe.withdraw();
+}
+```
+
+---
+
+# 4. Adding Owner Getter
+
+To test ownership behavior, we expose the owner safely.
+
+## FundMe.sol Getter
+
+```solidity id="o1p9xd"
+function getOwner() public view returns (address) {
+    return i_owner;
+}
+```
+
+> Ensure `i_owner` is marked `private`.
+
+---
+
+# 5. Testing Withdraw (Single Funder)
+
+We now apply the **Arrange – Act – Assert (AAA)** pattern.
+
+---
+
+## Test: Single Funder Withdraw
+
+```solidity id="a2v7lp"
+function testWithdrawFromASingleFunder() public funded {
+```
+
+---
+
+## The AAA Pattern (Arrange → Act → Assert)
+
+A standard methodology for structuring tests:
+
+| Stage       | What it does                            |
+| ----------- | --------------------------------------- |
+| **Arrange** | Set up initial state and variables      |
+| **Act**     | Execute the function being tested       |
+| **Assert**  | Verify the outcome matches expectations |
+
+## ARRANGE
+
+```solidity id="arr1"
+uint256 startingFundMeBalance = address(fundMe).balance;
+uint256 startingOwnerBalance = fundMe.getOwner().balance;
+```
+
+---
+
+## ACT
+
+```solidity id="act1"
+vm.startPrank(fundMe.getOwner());
+fundMe.withdraw();
+vm.stopPrank();
+```
+
+---
+
+## ASSERT
+
+```solidity id="ass1"
+uint256 endingFundMeBalance = address(fundMe).balance;
+uint256 endingOwnerBalance = fundMe.getOwner().balance;
+
+assertEq(endingFundMeBalance, 0);
+
+assert(
+    startingFundMeBalance + startingOwnerBalance ==
+    endingOwnerBalance
+);
+```
+
+---
+
+## Test: Withdraw from a Single Funder
+
+```solidity
+function testWithdrawFromASingleFunder() public funded {
+    // Arrange
+    uint256 startingFundMeBalance = address(fundMe).balance;
+    uint256 startingOwnerBalance = fundMe.getOwner().balance;
+
+    // Act
+    vm.startPrank(fundMe.getOwner());
+    fundMe.withdraw();
+    vm.stopPrank();
+
+    // Assert
+    uint256 endingFundMeBalance = address(fundMe).balance;
+    uint256 endingOwnerBalance = fundMe.getOwner().balance;
+    assertEq(endingFundMeBalance, 0);
+    assertEq(startingFundMeBalance + startingOwnerBalance, endingOwnerBalance);
+}
+```
+
+## Test: Withdraw from Multiple Funders
+
+This test simulates multiple users funding the contract.
+
+---
+
+## Test: Multiple Funders
+
+```solidity
+function testWithdrawFromMultipleFunders() public funded {
+    // Arrange
+    uint160 numberOfFunders = 10;
+    uint160 startingFunderIndex = 1; // avoid address(0)
+    for (uint160 i = startingFunderIndex; i < numberOfFunders + startingFunderIndex; i++) {
+        hoax(address(i), SEND_VALUE); // prank + deal
+        fundMe.fund{value: SEND_VALUE}();
+    }
+
+    uint256 startingFundMeBalance = address(fundMe).balance;
+    uint256 startingOwnerBalance = fundMe.getOwner().balance;
+
+    // Act
+    vm.startPrank(fundMe.getOwner());
+    fundMe.withdraw();
+    vm.stopPrank();
+
+    // Assert
+    assert(address(fundMe).balance == 0);
+    assert(startingFundMeBalance + startingOwnerBalance == fundMe.getOwner().balance);
+    assert((numberOfFunders + 1) * SEND_VALUE == fundMe.getOwner().balance - startingOwnerBalance);
+}
+```
+
+**Why `uint160` for the index?** Addresses are 20-byte values and `uint160` converts directly to `address` without an explicit cast. `+1` in the last assertion accounts for `alice` from the `funded` modifier.
+
+> **Never use `address(0)` for pranking** — it has special EVM treatment.
+
+## Why `hoax`?
+
+```text id="h0x1"
+hoax = prank + deal
+```
+
+It:
+
+- Sets `msg.sender`
+- Gives ETH balance
+- Executes transaction
+
+---
+
+## Why `+1`?
+
+```text id="one1"
+Alice is added via funded modifier
+```
+
+So total funders include:
+
+- loop funders
+- - alice
+
+---
+
+# 7. Testing Workflow Pattern (AAA)
+
+## ARRANGE
+
+Setup state:
+
+- Users
+- Balances
+- Preconditions
+
+---
+
+## ACT
+
+Execute function:
+
+- fund()
+- withdraw()
+
+---
+
+## ASSERT
+
+Verify results:
+
+- balances
+- mappings
+- arrays
+- state changes
+
+---
+
+# 8. Cheatcodes Used in This Lesson
+
+## vm.prank
+
+Simulate a single caller.
+
+```solidity id="c1"
+vm.prank(alice);
+```
+
+---
+
+## vm.startPrank / vm.stopPrank
+
+Persistent caller simulation.
+
+```solidity id="c2"
+vm.startPrank(alice);
+vm.stopPrank();
+```
+
+---
+
+## vm.expectRevert
+
+Ensure failure occurs.
+
+```solidity id="c3"
+vm.expectRevert();
+```
+
+---
+
+## hoax
+
+Combined prank + ETH funding.
+
+```solidity id="c4"
+hoax(address(i), SEND_VALUE);
+```
+
+---
+
+# 9. Key Testing Insights
+
+## 1. State Isolation
+
+Each test runs independently with `setUp()`.
+
+---
+
+## 2. Access Control Testing
+
+Always verify:
+
+- owner-only functions
+- revert conditions
+
+---
+
+## 3. Multi-User Simulation
+
+Use:
+
+- `makeAddr`
+- `prank`
+- `hoax`
+
+to simulate real-world interactions.
+
+---
+
+## 4. Gas & Balance Assertions
+
+Always verify:
+
+- contract balance = expected
+- user balance updates correctly
+
+---
+
+# 10. Summary of Improvements
+
+### Before
+
+- Limited coverage
+- Repeated setup code
+- No multi-user tests
+- Weak access control validation
+
+---
+
+### After
+
+- AAA structured tests
+- Reusable modifiers
+- Multi-user simulation
+- Full withdrawal coverage
+- Strong access control tests
+
+---
+
+# 11. Coverage Check
+
+Run:
+
+```bash id="cov1"
+forge coverage
+```
+
+Expected improvement:
+
+- Increased function coverage
+- Better branch coverage
+- More realistic test scenarios
+
+---
+
+# 12. Takeaway
+
+This lesson strengthens your Foundry testing skills by combining:
+
+- Cheatcodes (`prank`, `hoax`, `expectRevert`)
+- Modifiers for reuse
+- AAA testing pattern
+- Multi-user simulation
+- Balance validation
+
+These patterns form the foundation of **professional-grade Solidity test suites** and are essential for auditing and production-ready smart contracts.
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# An Introduction to Chisel
+
+## Overview
+
+**Chisel** is one of the four core components of the Foundry toolkit:
+
+- **Forge** → Build, test, and deploy smart contracts
+- **Cast** → Interact with blockchains from the command line
+- **Anvil** → Local Ethereum development node
+- **Chisel** → Interactive Solidity REPL (Read-Eval-Print Loop)
+
+Chisel allows you to quickly experiment with Solidity code directly from your terminal without creating contracts, writing tests, or opening Remix.
+
+It is ideal for:
+
+- Testing Solidity snippets
+- Understanding language behavior
+- Debugging small pieces of code
+- Experimenting with calculations
+- Verifying assumptions before adding code to a contract
+
+---
+
+# Starting Chisel
+
+From any Foundry project directory, run:
+
+```bash
+chisel
+```
+
+This launches an interactive Solidity shell.
+
+---
+
+Once inside, type `!help` to see all available commands.
+
+---
+
+## Examples
+
+### Variables and arithmetic
+
+```solidity
+uint256 cat = 1;
+cat
+// Type: uint256
+// Decimal: 1
+
+uint256 dog = 2;
+cat + dog
+// Type: uint256
+// Decimal: 3
+```
+
+### Testing `require`
+
+```solidity
+uint256 frog = 10;
+
+require(frog > cat);   // passes silently ✅
+
+require(cat > frog);   // reverts ❌
+// Traces:
+//   [197] 0xBd77...::run()
+//     └─ ← [Revert] EvmError: Revert
+// ⚒️ Chisel Error: Failed to execute REPL contract!
+```
+
+---
+
+This demonstrates how Chisel can quickly validate whether code reverts.
+
+---
+
+# Why Use Chisel?
+
+Traditionally, developers use:
+
+- Remix
+- Temporary test contracts
+- Unit tests
+
+to experiment with Solidity code.
+
+With Chisel, you can do this directly in your terminal.
+
+Example use cases:
+
+### Arithmetic Validation
+
+```solidity
+uint256 amount = 5 ether;
+amount / 2;
+```
+
+---
+
+### Type Conversion Testing
+
+```solidity
+address user = address(1);
+```
+
+---
+
+### Overflow and Underflow Experiments
+
+```solidity
+uint8 x = 255;
+x + 1;
+```
+
+---
+
+### Require Statements
+
+```solidity
+require(msg.value > 0);
+```
+
+---
+
+### Solidity Syntax Verification
+
+```solidity
+bytes32 hash = keccak256("hello");
+```
+
+---
+
+# Exiting Chisel
+
+To leave the REPL and return to your terminal:
+
+```text
+Ctrl + C
+Ctrl + C
+```
+
+(two times)
+
+---
+
+# Common Chisel Workflow
+
+### Start Chisel
+
+```bash
+chisel
+```
+
+### Declare Variables
+
+```solidity
+uint256 a = 10;
+uint256 b = 20;
+```
+
+### Execute Logic
+
+```solidity
+a + b
+```
+
+### Test Conditions
+
+```solidity
+require(a < b);
+```
+
+### Exit
+
+```text
+Ctrl+C
+Ctrl+C
+```
+
+---
+
+# Advantages of Chisel
+
+| Traditional Approach | Chisel                 |
+| -------------------- | ---------------------- |
+| Open Remix           | Stay in terminal       |
+| Create contract      | Write snippet directly |
+| Compile contract     | Instant execution      |
+| Write test file      | Immediate feedback     |
+| Slower iteration     | Rapid experimentation  |
+
+---
+
+# When to Use Chisel
+
+Use Chisel when you need to:
+
+- Test a Solidity expression
+- Verify a calculation
+- Check a type conversion
+- Experiment with language features
+- Understand revert behavior
+- Prototype logic before writing tests
+
+---
+
+# References
+
+### Foundry Documentation
+
+- Chisel Documentation: [https://book.getfoundry.sh/chisel/](https://book.getfoundry.sh/chisel/)
+- Foundry Book: [https://book.getfoundry.sh/](https://book.getfoundry.sh/)
+
+### Foundry Components
+
+- Forge: [https://book.getfoundry.sh/forge/](https://book.getfoundry.sh/forge/)
+- Cast: [https://book.getfoundry.sh/cast/](https://book.getfoundry.sh/cast/)
+- Anvil: [https://book.getfoundry.sh/anvil/](https://book.getfoundry.sh/anvil/)
+- Chisel: [https://book.getfoundry.sh/chisel/](https://book.getfoundry.sh/chisel/)
+
+---
+
+# Key Concepts Learned
+
+### Chisel
+
+An interactive Solidity REPL included with Foundry.
+
+### REPL
+
+**Read → Evaluate → Print → Loop**
+
+Allows interactive execution of code.
+
+### Instant Feedback
+
+Quickly test Solidity behavior without writing contracts or tests.
+
+### Debugging Tool
+
+Useful for validating assumptions and understanding Solidity mechanics before implementation.
+
+---
+
+# Takeaway
+
+Chisel is essentially **"Remix inside your terminal"**. It provides a fast, lightweight environment for experimenting with Solidity code, testing assumptions, and debugging logic without creating contracts or running full test suites. As your Solidity development becomes more advanced, Chisel becomes an invaluable tool for rapid prototyping and exploration.
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# Measuring and Understanding Gas Costs in Foundry
+
+## Overview
+
+**Gas** is the unit used to measure the computational work required to execute operations on the Ethereum Virtual Machine (EVM).
+
+Every transaction executed on-chain consumes gas, and users must pay for that gas using ETH.
+
+As a smart contract developer, one of your responsibilities is to write efficient code that minimizes gas consumption. Lower gas costs improve:
+
+- User experience
+- Protocol adoption
+- Transaction throughput
+- Capital efficiency
+
+Expensive smart contracts can discourage users from interacting with your protocol.
+
+---
+
+# What Is Gas?
+
+Gas represents the computational effort required to:
+
+- Execute functions
+- Modify storage
+- Deploy contracts
+- Transfer ETH
+- Interact with other contracts
+
+Users pay:
+
+```text
+Gas Cost = Gas Used × Gas Price
+```
+
+Where:
+
+- **Gas Used** → Amount of computation consumed
+- **Gas Price** → Price per unit of gas (usually measured in gwei)
+
+---
+
+# Why Gas Optimization Matters
+
+Imagine a user wants to swap:
+
+```text
+0.1 ETH → 300 USDC
+```
+
+but pays:
+
+```text
+30 USDC in gas fees
+```
+
+Most users would avoid using that protocol.
+
+Good smart contract design focuses on:
+
+- Fewer storage writes
+- Efficient loops
+- Optimized data structures
+- Reduced external calls
+
+---
+
+# Measuring Gas in Foundry
+
+Foundry provides several tools for measuring gas consumption.
+
+## Measuring Gas with `forge snapshot`
+
+```bash
+forge snapshot --mt testWithdrawFromASingleFunder
+```
+
+This creates a `.gas-snapshot` file in the project root:
+
+```
+FundMeTest:testWithdrawFromASingleFunder() (gas: 84824)
+```
+
+### Converting gas to USD
+
+1. Get current gas price from [Etherscan Gas Tracker](https://etherscan.io/gastracker)
+2. Multiply: `84,824 gas × 7 gwei = 593,768 gwei`
+3. Convert gwei → ETH → USD using [Alchemy Converter](https://www.alchemy.com/gwei-calculator) and [CoinMarketCap](https://coinmarketcap.com/)
+
+> Gas price and ETH price change constantly — always use the links above for current values.
+
+---
+
+# Why Tests Ignore Gas Costs
+
+Anvil defaults gas price to **0** so gas costs don't interfere with balance assertions. On Ethereum mainnet the gas price is non-zero (e.g. ~7 gwei at time of writing).
+
+This simplifies testing because balance assertions remain deterministic.
+
+Example:
+
+```solidity
+assertEq(
+    startingFundMeBalance + startingOwnerBalance,
+    endingOwnerBalance
+);
+```
+
+passes because gas costs are effectively zero.
+
+---
+
+## Simulating Real Gas Costs in Tests
+
+Use `vm.txGasPrice` and `gasleft()` to measure actual gas consumed:
+
+```solidity
+uint256 constant GAS_PRICE = 1;
+
+function testWithdrawFromASingleFunder() public funded {
+    // Arrange
+    uint256 startingFundMeBalance = address(fundMe).balance;
+    uint256 startingOwnerBalance = fundMe.getOwner().balance;
+
+    vm.txGasPrice(GAS_PRICE);      // set gas price for next tx
+    uint256 gasStart = gasleft();  // gas remaining before tx
+
+    // Act
+    vm.startPrank(fundMe.getOwner());
+    fundMe.withdraw();
+    vm.stopPrank();
+
+    uint256 gasEnd = gasleft();    // gas remaining after tx
+    uint256 gasUsed = (gasStart - gasEnd) * tx.gasprice;
+    console.log("Withdraw consumed: %d gas", gasUsed);
+
+    // Assert
+    uint256 endingFundMeBalance = address(fundMe).balance;
+    uint256 endingOwnerBalance = fundMe.getOwner().balance;
+    assertEq(endingFundMeBalance, 0);
+    assertEq(startingFundMeBalance + startingOwnerBalance, endingOwnerBalance);
+}
+```
+
+| Tool                   | Purpose                                                 | Docs                                                               |
+| ---------------------- | ------------------------------------------------------- | ------------------------------------------------------------------ |
+| `vm.txGasPrice(price)` | Sets gas price for the next transaction                 | [docs](https://book.getfoundry.sh/cheatcodes/tx-gas-price)         |
+| `gasleft()`            | Built-in Solidity — returns remaining gas in current tx | Solidity built-in                                                  |
+| `console.log`          | Logs values during test execution                       | [docs](https://book.getfoundry.sh/reference/forge-std/console-log) |
+
+Run with verbosity to see the log output:
+
+```bash
+forge test --mt testWithdrawFromASingleFunder -vv
+```
+
+Output:
+
+```
+[PASS] testWithdrawFromASingleFunder() (gas: 87869)
+Logs:
+  Withdraw consumed: 10628 gas
+```
+
+# Simulating Real Gas Costs
+
+To include gas costs in tests, define:
+
+```solidity
+uint256 constant GAS_PRICE = 1;
+```
+
+---
+
+# Setting Transaction Gas Price
+
+Foundry provides the cheatcode:
+
+```solidity
+vm.txGasPrice(GAS_PRICE);
+```
+
+This applies to the next transaction.
+
+Example:
+
+```solidity
+vm.txGasPrice(GAS_PRICE);
+```
+
+---
+
+# Measuring Gas Consumption
+
+Solidity provides the built-in function:
+
+```solidity
+gasleft();
+```
+
+Returns:
+
+```text
+Remaining gas available
+```
+
+during transaction execution.
+
+---
+
+# Recording Gas Before Execution
+
+```solidity
+uint256 gasStart = gasleft();
+```
+
+---
+
+# Execute Transaction
+
+```solidity
+vm.startPrank(fundMe.getOwner());
+
+fundMe.withdraw();
+
+vm.stopPrank();
+```
+
+---
+
+# Record Remaining Gas
+
+```solidity
+uint256 gasEnd = gasleft();
+```
+
+---
+
+# Calculate Gas Used
+
+```solidity
+uint256 gasUsed =
+    (gasStart - gasEnd) * tx.gasprice;
+```
+
+Formula:
+
+```text
+Gas Consumed × Gas Price
+```
+
+---
+
+# Logging Gas Usage
+
+Foundry supports console logging.
+
+```solidity
+console.log(
+    "Withdraw consumed: %d gas",
+    gasUsed
+);
+```
+
+---
+
+# Complete Example
+
+```solidity
+uint256 constant GAS_PRICE = 1;
+
+function testWithdrawFromASingleFunder()
+    public
+    funded
+{
+    // Arrange
+
+    uint256 startingFundMeBalance =
+        address(fundMe).balance;
+
+    uint256 startingOwnerBalance =
+        fundMe.getOwner().balance;
+
+    vm.txGasPrice(GAS_PRICE);
+
+    uint256 gasStart = gasleft();
+
+    // Act
+
+    vm.startPrank(fundMe.getOwner());
+
+    fundMe.withdraw();
+
+    vm.stopPrank();
+
+    uint256 gasEnd = gasleft();
+
+    uint256 gasUsed =
+        (gasStart - gasEnd) * tx.gasprice;
+
+    console.log(
+        "Withdraw consumed: %d gas",
+        gasUsed
+    );
+
+    // Assert
+
+    uint256 endingFundMeBalance =
+        address(fundMe).balance;
+
+    uint256 endingOwnerBalance =
+        fundMe.getOwner().balance;
+
+    assertEq(endingFundMeBalance, 0);
+
+    assertEq(
+        startingFundMeBalance +
+        startingOwnerBalance,
+        endingOwnerBalance
+    );
+}
+```
+
+---
+
+# Running the Test
+
+```bash
+forge test --mt testWithdrawFromASingleFunder -vv
+```
+
+Example output:
+
+```text
+[PASS] testWithdrawFromASingleFunder()
+
+Logs:
+Withdraw consumed: 10628 gas
+```
+
+---
+
+# Understanding the Result
+
+Example:
+
+```text
+Withdraw consumed: 10628 gas
+```
+
+means:
+
+```text
+withdraw()
+```
+
+required approximately:
+
+```text
+10,628 units of gas
+```
+
+to execute.
+
+This becomes your optimization baseline.
+
+Future refactorings should attempt to reduce this number.
+
+---
+
+Generate gas report:
+
+```bash
+forge snapshot
+```
+
+Specific test:
+
+```bash
+forge snapshot --mt testWithdrawFromASingleFunder
+```
+
+Verbose execution:
+
+```bash
+forge test -vv
+```
+
+Coverage report:
+
+```bash
+forge coverage
+```
+
+---
+
+# Takeaway
+
+Gas optimization is one of the most important aspects of professional smart contract development. Foundry provides powerful tooling such as `forge snapshot`, `gasleft()`, `vm.txGasPrice()`, and `console.log()` that allow developers to measure, understand, and optimize gas consumption. Before optimizing, always establish a baseline measurement so improvements can be quantified and verified objectively.
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# Optimizing the Withdraw Function for Gas Efficiency
+
+## Overview
+
+One of the most important aspects of Solidity optimization is minimizing **storage reads (`SLOAD`)** and **storage writes (`SSTORE`)**.
+
+Storage operations are among the most expensive operations in the Ethereum Virtual Machine (EVM). Even small optimizations can produce measurable gas savings, especially inside loops.
+
+In this lesson, we optimize the `withdraw()` function by reducing unnecessary storage access and benchmark the improvement using Foundry's gas snapshot tools.
+
+---
+
+# Why Storage Is Expensive
+
+Ethereum stores smart contract state in persistent storage.
+
+Examples:
+
+```solidity
+mapping(address => uint256) s_addressToAmountFunded;
+address[] s_funders;
+```
+
+---
+
+These variables live in **storage**, meaning every access requires expensive EVM operations.
+
+---
+
+# Exploring EVM Opcodes
+
+Start a local Anvil node:
+
+```bash
+anvil
+```
+
+---
+
+Deploy the contract:
+
+```bash
+forge script DeployFundMe \
+--rpc-url http://127.0.0.1:8545 \
+--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+--broadcast
+```
+
+Copy the deployed FundMe address.
+
+---
+
+Inspect the contract bytecode:
+
+```bash
+cast code <FUNDME_ADDRESS>
+```
+
+Example:
+
+```bash
+cast code 0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9
+```
+
+This outputs the contract's EVM bytecode.
+
+---
+
+# Decoding Bytecode
+
+Bytecode can be decoded into **EVM Opcodes**:
+
+```text
+PUSH1
+MSTORE
+CALLDATASIZE
+JUMPI
+SLOAD
+SSTORE
+...
+```
+
+Opcodes are the low-level instructions executed by the EVM.
+
+Reference:
+
+- Ethereum Opcodes: [https://www.evm.codes/](https://www.evm.codes/)
+
+---
+
+# Storage vs Memory Costs
+
+Particularly important opcodes:
+
+| Opcode   | Purpose       | Minimum Gas     |
+| -------- | ------------- | --------------- |
+| `MLOAD`  | Read Memory   | 3               |
+| `MSTORE` | Write Memory  | 3               |
+| `SLOAD`  | Read Storage  | 100+            |
+| `SSTORE` | Write Storage | 100+ to 20,000+ |
+
+Storage access is often **30x+ more expensive** than memory access.
+
+---
+
+# Original Withdraw Problem
+
+Consider this loop:
+
+```solidity
+for (
+    uint256 funderIndex = 0;
+    funderIndex < s_funders.length;
+    funderIndex++
+)
+```
+
+Problem:
+
+```text
+s_funders.length
+```
+
+is stored in contract storage.
+
+Each loop iteration performs:
+
+```text
+SLOAD(s_funders.length)
+```
+
+If there are:
+
+```text
+1000 funders
+```
+
+the length is read:
+
+```text
+1000 times
+```
+
+resulting in unnecessary gas costs.
+
+---
+
+# Optimization Strategy
+
+Instead of repeatedly reading storage, cache the value in memory.
+
+---
+
+## Optimized Function
+
+```solidity
+function cheaperWithdraw() public onlyOwner {
+    uint256 fundersLength = s_funders.length; // cache length in memory ✅
+
+    for (uint256 funderIndex = 0; funderIndex < fundersLength; funderIndex++) {
+        address funder = s_funders[funderIndex];
+        s_addressToAmountFunded[funder] = 0;
+    }
+    s_funders = new address[](0);
+
+    (bool callSuccess,) = payable(msg.sender).call{value: address(this).balance}("");
+    require(callSuccess, "Call failed");
+}
+```
+
+---
+
+# What Changed?
+
+## Before
+
+```solidity
+funderIndex < s_funders.length
+```
+
+Every iteration:
+
+```text
+SLOAD(s_funders.length)
+```
+
+---
+
+## After
+
+```solidity
+uint256 fundersLength =
+    s_funders.length;
+```
+
+Loop uses:
+
+```solidity
+funderIndex < fundersLength
+```
+
+which is stored in memory.
+
+---
+
+# Why This Helps
+
+Memory access:
+
+```text
+MLOAD / MSTORE
+≈ 3 gas
+```
+
+Storage access:
+
+```text
+SLOAD
+≈ 100+ gas
+```
+
+Reading once and reusing is significantly cheaper.
+
+## `fundersLength` is stored in memory — reading it 1,000 times costs `3 gas × 1,000 = 3,000 gas` instead of `100 gas × 1,000 = 100,000 gas`.
+
+# What Cannot Be Optimized Away
+
+These operations still require storage access:
+
+## Reading Funders
+
+```solidity
+address funder =
+    s_funders[funderIndex];
+```
+
+Must read storage.
+
+---
+
+## Resetting Mapping
+
+```solidity
+s_addressToAmountFunded[funder] = 0;
+```
+
+Must write storage.
+
+---
+
+## Resetting Array
+
+```solidity
+s_funders = new address[](0);
+```
+
+Must write storage.
+
+---
+
+## Sending ETH
+
+```solidity
+call{value: ...}
+```
+
+Required for withdrawal.
+
+---
+
+# Testing the Optimization
+
+Create a second test based on the original multi-funder withdrawal test.
+
+---
+
+## Test: cheaperWithdraw
+
+```solidity
+function testWithdrawFromMultipleFundersCheaper() public funded
+{
+    uint160 numberOfFunders = 10;
+    uint160 startingFunderIndex = 1;
+
+    for (
+        uint160 i = startingFunderIndex;
+        i < numberOfFunders + startingFunderIndex;
+        i++
+    ) {
+        hoax(address(i), SEND_VALUE);
+
+        fundMe.fund{value: SEND_VALUE}();
+    }
+
+    uint256 startingFundMeBalance =
+        address(fundMe).balance;
+
+    uint256 startingOwnerBalance =
+        fundMe.getOwner().balance;
+
+    vm.startPrank(fundMe.getOwner());
+
+    fundMe.cheaperWithdraw();
+
+    vm.stopPrank();
+
+    assert(address(fundMe).balance == 0);
+
+    assert(
+        startingFundMeBalance +
+        startingOwnerBalance ==
+        fundMe.getOwner().balance
+    );
+
+    assert(
+        (numberOfFunders + 1) *
+        SEND_VALUE ==
+        fundMe.getOwner().balance -
+        startingOwnerBalance
+    );
+}
+```
+
+---
+
+# Measuring the Difference
+
+Run:
+
+```bash
+forge snapshot
+```
+
+---
+
+Example `.gas-snapshot` output:
+
+```text
+FundMeTest:testWithdrawFromMultipleFunders()
+(gas: 535148)
+
+FundMeTest:testWithdrawFromMultipleFundersCheaper()
+(gas: 534219)
+```
+
+---
+
+# Gas Savings
+
+```text
+535148 - 534219
+=
+929 gas saved
+```
+
+Savings:
+
+```text
+929 gas
+```
+
+from caching a single storage read.
+
+---
+
+# Why Naming Conventions Matter
+
+The optimization was easy to identify because of the storage prefix:
+
+```solidity
+s_funders
+```
+
+Immediately indicates:
+
+```text
+Storage Variable
+```
+
+making expensive operations easier to spot.
+
+---
+
+# Solidity Naming Conventions
+
+Recommended style:
+
+| Prefix       | Meaning               |
+| ------------ | --------------------- |
+| `s_`         | Storage Variable      |
+| `i_`         | Immutable Variable    |
+| `UPPER_CASE` | Constant              |
+| no prefix    | Local/Memory Variable |
+
+Examples:
+
+```solidity
+address[] private s_funders;
+```
+
+```solidity
+address private immutable i_owner;
+```
+
+```solidity
+uint256 constant MINIMUM_USD = 5e18;
+```
+
+---
+
+# Common Gas Optimization Techniques
+
+## Cache Storage Reads
+
+```solidity
+uint256 length = s_array.length;
+```
+
+---
+
+## Use Constants
+
+```solidity
+uint256 constant DECIMALS = 8;
+```
+
+---
+
+## Use Immutable Variables
+
+```solidity
+address immutable i_owner;
+```
+
+---
+
+## Minimize Storage Writes
+
+Storage writes are among the most expensive EVM operations.
+
+---
+
+## Avoid Repeated External Calls
+
+Cache results when possible.
+
+---
+
+## Reduce Loop Costs
+
+Move expensive operations outside loops.
+
+---
+
+# Useful Commands
+
+Start local chain:
+
+```bash
+anvil
+```
+
+Deploy contract:
+
+```bash
+forge script DeployFundMe \
+--rpc-url http://127.0.0.1:8545 \
+--broadcast
+```
+
+Inspect bytecode:
+
+```bash
+cast code <contract-address>
+```
+
+Generate gas report:
+
+```bash
+forge snapshot
+```
+
+Run tests:
+
+```bash
+forge test
+```
+
+---
+
+# References
+
+### Foundry Documentation
+
+- Foundry Book: [https://book.getfoundry.sh/](https://book.getfoundry.sh/)
+
+### EVM Opcodes
+
+- [https://www.evm.codes/](https://www.evm.codes/)
+
+### Solidity Style Guide
+
+- [https://docs.soliditylang.org/en/latest/style-guide.html](https://docs.soliditylang.org/en/latest/style-guide.html)
+
+---
+
+# Key Concepts Learned
+
+### Storage Is Expensive
+
+`SLOAD` and `SSTORE` are among the most costly EVM operations.
+
+---
+
+### Memory Is Cheap
+
+Use local variables whenever possible.
+
+---
+
+### Cache Storage Reads
+
+Avoid repeatedly reading the same storage value inside loops.
+
+---
+
+### Measure Everything
+
+Use:
+
+```bash
+forge snapshot
+```
+
+to validate optimizations objectively.
+
+---
+
+### Small Optimizations Scale
+
+Saving:
+
+```text
+929 gas
+```
+
+on a single transaction may seem small, but multiplied across thousands of users and transactions, it can significantly reduce protocol costs.
+
+---
+
+# Takeaway
+
+A major source of gas inefficiency comes from repeated storage access. By caching `s_funders.length` into a memory variable and reusing it inside the loop, the `cheaperWithdraw()` function reduces gas consumption without changing functionality. Always profile your contracts with `forge snapshot`, identify expensive storage operations, and move repeated reads into memory whenever possible. This is one of the most common and effective gas optimization techniques used in professional Solidity development and audits.
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# Gas Optimisation: The `cheaperWithdraw` Function
+
+## Why Storage Is Expensive
+
+Every read/write to contract storage costs significantly more gas than memory operations:
+
+| Opcode             | Operation              | Min gas cost |
+| ------------------ | ---------------------- | ------------ |
+| `MLOAD` / `MSTORE` | Read/write **memory**  | 3 gas        |
+| `SLOAD` / `SSTORE` | Read/write **storage** | 100 gas      |
+
+That's a **33×+ difference** — and these are minimums. See the full [EVM opcode reference](https://www.evm.codes/) for details.
+
+---
+
+## The Problem in `withdraw()`
+
+The original `withdraw` loop reads `s_funders.length` from storage on **every single iteration**:
+
+```solidity
+for (uint256 funderIndex = 0; funderIndex < s_funders.length; funderIndex++) {
+```
+
+With 1,000 funders, that's 1,000 `SLOAD` operations just for the array length.
+
+---
+
+## The Fix: Cache Storage Variables in Memory
+
+```solidity
+function cheaperWithdraw() public onlyOwner {
+    uint256 fundersLength = s_funders.length; // cache length in memory ✅
+
+    for (uint256 funderIndex = 0; funderIndex < fundersLength; funderIndex++) {
+        address funder = s_funders[funderIndex];
+        s_addressToAmountFunded[funder] = 0;
+    }
+    s_funders = new address[](0);
+
+    (bool callSuccess,) = payable(msg.sender).call{value: address(this).balance}("");
+    require(callSuccess, "Call failed");
+}
+```
+
+`fundersLength` is stored in memory — reading it 1,000 times costs `3 gas × 1,000 = 3,000 gas` instead of `100 gas × 1,000 = 100,000 gas`.
+
+The storage reads inside the loop (`s_funders[funderIndex]`, `s_addressToAmountFunded[funder]`) cannot be avoided — the data must be read and cleared.
+
+---
+
+## Measuring the Savings
+
+Add the equivalent test using `cheaperWithdraw`:
+
+```solidity
+function testWithdrawFromMultipleFundersCheaper() public funded {
+    uint160 numberOfFunders = 10;
+    uint160 startingFunderIndex = 1;
+    for (uint160 i = startingFunderIndex; i < numberOfFunders + startingFunderIndex; i++) {
+        hoax(address(i), SEND_VALUE);
+        fundMe.fund{value: SEND_VALUE}();
+    }
+
+    uint256 startingFundMeBalance = address(fundMe).balance;
+    uint256 startingOwnerBalance = fundMe.getOwner().balance;
+
+    vm.startPrank(fundMe.getOwner());
+    fundMe.cheaperWithdraw();
+    vm.stopPrank();
+
+    assert(address(fundMe).balance == 0);
+    assert(startingFundMeBalance + startingOwnerBalance == fundMe.getOwner().balance);
+    assert((numberOfFunders + 1) * SEND_VALUE == fundMe.getOwner().balance - startingOwnerBalance);
+}
+```
+
+Run `forge snapshot` and compare `.gas-snapshot`:
+
+```
+FundMeTest:testWithdrawFromMultipleFunders()        (gas: 535148)
+FundMeTest:testWithdrawFromMultipleFundersCheaper() (gas: 534219)
+```
+
+**929 gas saved** just by caching one variable. The savings grow proportionally with the number of funders.
+
+---
+
+## Key Takeaway
+
+The `s_` prefix on storage variables (`s_funders`, `s_addressToAmountFunded`) makes it immediately obvious when you're touching storage — which is exactly what helps you spot optimization opportunities like this one.
+
+Follow the [Solidity style guide](https://docs.soliditylang.org/en/latest/style-guide.html) naming conventions:
+
+| Prefix     | Meaning            |
+| ---------- | ------------------ |
+| `s_`       | Storage variable   |
+| `i_`       | Immutable variable |
+| `ALL_CAPS` | Constant           |
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# Integration Tests and Interaction Scripts
+
+## Overview
+
+Up until this point, we have primarily written **unit tests**, which verify individual contract functions in isolation.
+
+The next step is **integration testing**, where we validate how multiple components of the system work together:
+
+- Deployment scripts
+- Interaction scripts
+- Smart contracts
+- User accounts
+- Ownership logic
+
+## Integration tests verify how your contract interacts with other contracts, external APIs, and the wider ecosystem. Before writing them, we create interaction scripts to programmatically fund and withdraw from `FundMe`.
+
+# Creating Interaction Scripts
+
+To interact with the deployed `FundMe` contract programmatically, create a new script:
+
+```text
+script/
+└── Interactions.s.sol
+```
+
+This file contains scripts for:
+
+- Funding the contract
+- Withdrawing funds
+
+Each script:
+
+- Inherits from `Script`
+- Implements a `run()` function
+- Can be executed via `forge script`
+
+---
+
+# Installing foundry-devops
+
+To automatically discover the latest deployed contract address:
+
+```bash
+forge install Cyfrin/foundry-devops
+```
+
+The library provides utilities that help scripts interact with the most recently deployed contracts.
+
+Repository:
+
+```text
+https://github.com/Cyfrin/foundry-devops
+```
+
+---
+
+# Fund and Withdraw Script
+
+```solidity
+contract FundFundMe is Script {
+    uint256 SEND_VALUE = 0.1 ether;
+
+    function fundFundMe(address mostRecentlyDeployed) public {
+        vm.startBroadcast();
+
+        FundMe(payable(mostRecentlyDeployed))
+            .fund{value: SEND_VALUE}();
+
+        vm.stopBroadcast();
+
+        console.log(
+            "Funded FundMe with %s",
+            SEND_VALUE
+        );
+    }
+
+    function run() external {
+        address mostRecentlyDeployed =
+            DevOpsTools.get_most_recent_deployment(
+                "FundMe",
+                block.chainid
+            );
+
+        fundFundMe(mostRecentlyDeployed);
+    }
+}
+```
+
+### Responsibilities
+
+- Find latest deployment
+- Broadcast transaction
+- Call `fund()`
+- Send `0.1 ETH`
+
+---
+
+# Withdraw Script
+
+```solidity
+contract WithdrawFundMe is Script {
+
+    function withdrawFundMe(
+        address mostRecentlyDeployed
+    ) public {
+
+        vm.startBroadcast();
+
+        FundMe(payable(mostRecentlyDeployed))
+            .withdraw();
+
+        vm.stopBroadcast();
+
+        console.log(
+            "Withdraw FundMe balance!"
+        );
+    }
+
+    function run() external {
+        address mostRecentlyDeployed =
+            DevOpsTools.get_most_recent_deployment(
+                "FundMe",
+                block.chainid
+            );
+
+        withdrawFundMe(
+            mostRecentlyDeployed
+        );
+    }
+}
+```
+
+### Responsibilities
+
+- Find latest deployment
+- Broadcast transaction
+- Execute withdrawal
+
+---
+
+# Using DevOpsTools
+
+The key utility is:
+
+```solidity
+DevOpsTools.get_most_recent_deployment(
+    "FundMe",
+    block.chainid
+);
+```
+
+`DevOpsTools.get_most_recent_deployment()` reads from the `broadcast/` folder to find the latest deployment address for a given contract name and chain ID.
+
+Benefits:
+
+- No hardcoded addresses
+- Network agnostic
+- Automatically uses latest deployment
+
+This is particularly useful when deploying frequently during development.
+
+---
+
+# Organizing Tests
+
+As projects grow, separating test types becomes important.
+
+Recommended structure:
+
+```text
+test/
+├── unit/
+│   └── FundMe.t.sol
+└── integration/
+    └── InteractionsTest.t.sol
+```
+
+---
+
+# Unit Tests
+
+Focus on:
+
+- Individual functions
+- Edge cases
+- Internal logic
+
+Example:
+
+```text
+fund()
+withdraw()
+constructor()
+```
+
+---
+
+# Integration Tests
+
+Focus on:
+
+- Deployment scripts
+- Contract interactions
+- End-to-end workflows
+- Real user behavior
+
+---
+
+# Integration Test Setup
+
+Create `test/integration/FundMeTestIntegration.t.sol`:
+
+---
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.19;
+
+import {DeployFundMe} from "../../script/DeployFundMe.s.sol";
+import {FundFundMe, WithdrawFundMe} from "../../script/Interactions.s.sol";
+import {FundMe} from "../../src/FundMe.sol";
+import {Test, console} from "forge-std/Test.sol";
+
+contract InteractionsTest is Test {
+    FundMe public fundMe;
+    DeployFundMe deployFundMe;
+
+    uint256 public constant SEND_VALUE = 0.1 ether;
+    uint256 public constant STARTING_USER_BALANCE = 10 ether;
+    address alice = makeAddr("alice");
+
+    function setUp() external {
+        deployFundMe = new DeployFundMe();
+        fundMe = deployFundMe.run();
+        vm.deal(alice, STARTING_USER_BALANCE);
+    }
+
+    function testUserCanFundAndOwnerWithdraw() public {
+        uint256 preUserBalance = address(alice).balance;
+        uint256 preOwnerBalance = address(fundMe.getOwner()).balance;
+
+        vm.prank(alice);
+        fundMe.fund{value: SEND_VALUE}();
+
+        WithdrawFundMe withdrawFundMe = new WithdrawFundMe();
+        withdrawFundMe.withdrawFundMe(address(fundMe));
+
+        uint256 afterUserBalance = address(alice).balance;
+        uint256 afterOwnerBalance = address(fundMe.getOwner()).balance;
+
+        assert(address(fundMe).balance == 0);
+        assertEq(afterUserBalance + SEND_VALUE, preUserBalance);
+        assertEq(preOwnerBalance + SEND_VALUE, afterOwnerBalance);
+    }
+}
+```
+
+Run the integration test:
+
+```bash
+forge test --mt testUserCanFundAndOwnerWithdraw -vv
+```
+
+---
+
+# Test Flow
+
+### Arrange
+
+```text
+Record balances
+```
+
+### Act
+
+```text
+Alice funds contract
+Owner withdraws funds
+```
+
+### Assert
+
+```text
+FundMe balance = 0
+
+Alice balance decreased
+
+Owner balance increased
+```
+
+This follows the AAA pattern:
+
+```text
+Arrange
+Act
+Assert
+```
+
+---
+
+# Running Integration Tests
+
+Run a specific test:
+
+```bash
+forge test \
+--mt testUserCanFundAndOwnerWithdraw \
+-vv
+```
+
+Expected output:
+
+```text
+[PASS]
+testUserCanFundAndOwnerWithdraw()
+
+Logs:
+Withdraw FundMe balance!
+```
+
+---
+
+# Why Integration Tests Matter
+
+Unit tests prove that individual functions work.
+
+Integration tests prove that:
+
+```text
+Deployment
+    ↓
+Funding
+    ↓
+Withdrawal
+    ↓
+Balance Updates
+```
+
+all work together correctly.
+
+This is much closer to how real users interact with your protocol.
+
+---
+
+# foundry-devops Compatibility Issue
+
+## Troubleshooting
+
+If `foundry-devops` fails to build due to a deprecated `vm.keyExists`:
+
+1. Replace `vm.keyExists` with `vm.keyExistsJson` in `foundry-devops/src/DevOpsTools.sol:119`
+2. If `vm.keyExistsJson` is missing from your `Vm.sol`, run:
+
+```bash
+forge update --force
+```
+
+---
+
+# About FFI (Foreign Function Interface)
+
+FFI allows Solidity tests to execute shell commands.
+
+Example capabilities:
+
+- Call scripts
+- Execute binaries
+- Read external files
+- Interact with OS tools
+
+Documentation:
+
+```text
+https://book.getfoundry.sh/cheatcodes/ffi
+```
+
+---
+
+# FFI Security Warning
+
+FFI can execute arbitrary commands on your machine.
+
+Always inspect projects before running them.
+
+Check:
+
+```toml
+ffi = true
+```
+
+inside:
+
+```text
+foundry.toml
+```
+
+If enabled:
+
+- Review all usages carefully
+- Understand what commands are executed
+- Never blindly run unknown repositories
+
+---
+
+# Project Structure After Refactor
+
+```text
+fund-me/
+│
+├── src/
+│   └── FundMe.sol
+│
+├── script/
+│   ├── DeployFundMe.s.sol
+│   ├── HelperConfig.s.sol
+│   └── Interactions.s.sol
+│
+├── test/
+│   ├── unit/
+│   │   └── FundMe.t.sol
+│   │
+│   └── integration/
+│       └── InteractionsTest.t.sol
+│
+├── lib/
+│
+└── foundry.toml
+```
+
+---
+
+# Key Concepts Learned
+
+### Integration Testing
+
+Tests complete workflows involving multiple contracts and scripts.
+
+### foundry-devops
+
+Provides deployment tracking and latest deployment discovery.
+
+### Interaction Scripts
+
+Allow contracts to be funded or withdrawn without manually supplying addresses.
+
+### End-to-End Validation
+
+Tests actual user journeys instead of isolated function calls.
+
+### FFI Awareness
+
+Powerful feature, but potentially dangerous if used carelessly.
+
+---
+
+# References
+
+### Foundry Documentation
+
+- [https://book.getfoundry.sh/](https://book.getfoundry.sh/)
+
+### Foundry Cheatcodes
+
+- [https://book.getfoundry.sh/cheatcodes/](https://book.getfoundry.sh/cheatcodes/)
+
+### FFI Documentation
+
+- [https://book.getfoundry.sh/cheatcodes/ffi](https://book.getfoundry.sh/cheatcodes/ffi)
+
+### Cyfrin Foundry DevOps
+
+- [https://github.com/Cyfrin/foundry-devops](https://github.com/Cyfrin/foundry-devops)
+
+### Solidity Testing Best Practices
+
+- [https://docs.soliditylang.org/](https://docs.soliditylang.org/)
+
+---
+
+# Takeaway
+
+Integration tests bridge the gap between unit tests and real-world usage. By introducing interaction scripts (`FundFundMe` and `WithdrawFundMe`) and leveraging `foundry-devops` to locate deployments automatically, the FundMe project can now validate complete user workflows—from deployment to funding and withdrawal—providing significantly stronger confidence in the system's behavior across different environments.
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
 # ------------------------------------------------
 
 ```
