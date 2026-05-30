@@ -20,10 +20,14 @@ contract FundMeTest is Test {
     FundMe public fundMe;
     DeployFundMe public deployFundMe;
     AggregatorV3Interface private s_priceFeed;
+    uint256 constant SEND_VALUE = 0.1 ether;
+    uint256 constant STARTING_BALANCE = 10 ether;
+    address alice = makeAddr("alice");
 
     function setUp() public {
         deployFundMe = new DeployFundMe();
         fundMe = deployFundMe.run();
+        vm.deal(alice, STARTING_BALANCE);
         // fundMe = new FundMe();
     }
 
@@ -66,5 +70,20 @@ contract FundMeTest is Test {
         uint256 price = fundMe.getPrice();
         console.log("Price: ", price);
         assert(price > 198760000000000000000 && price < 3000000000000000000000);
+    }
+
+    function testFundFailsWithoutEnoughETH() public {
+        // vm.expectRevert(); // Fund reverts without enough ETH
+        vm.expectRevert(bytes("didn't send enough eht"));
+        fundMe.fund();
+    }
+
+    function testFundUpdatesFundDataStructure() public {
+        // vm.prank(alice); // alice is msg.sender for the next call
+        vm.startPrank(alice);
+        fundMe.fund{value: SEND_VALUE}();
+        uint256 amountFunded = fundMe.getAddressToAmountFunded(alice);
+        vm.stopPrank();
+        assertEq(amountFunded, SEND_VALUE);
     }
 }

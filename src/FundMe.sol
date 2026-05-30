@@ -44,16 +44,18 @@ contract FundMe {
 
     // State Variables
     AggregatorV3Interface private immutable s_priceFeed;
-    uint256 public unlockTime = block.timestamp + 1 days;
+    uint256 private unlockTime = block.timestamp + 1 days;
     uint256 public constant MINIMUM_USD = 5e18;
-    address[] public funders;
-    mapping(address => uint256) public addressToAmountFunded;
-    mapping(address => uint256) public addressToContributionCount;
-    address public immutable i_owner;
+    address[] private s_funders;
+    mapping(address => uint256) private s_addressToAmountFunded;
+    mapping(address => uint256) private s_addressToContributionCount;
+    address private immutable i_owner;
 
+    // Events
     event FundReceived(address indexed funder, uint256 amount);
     event Withdrawn(address indexed owner, uint256 amount);
 
+    // Functions
     function getMinimumUSD() public pure returns (uint256) {
         return MINIMUM_USD;
     }
@@ -68,20 +70,20 @@ contract FundMe {
         // require(msg.value >= 1e18, "didn't send enough eht"); // 1 eth
         // require(PriceConverter.getConversionRate(msg.value) >= minimumUSD, "didn't send enough eht"); // 1 eth
         require(msg.value.getConversionRate(s_priceFeed) >= MINIMUM_USD, "didn't send enough eht"); // 1 eth
-        funders.push(msg.sender);
-        addressToAmountFunded[msg.sender] += msg.value;
-        addressToContributionCount[msg.sender] += 1;
+        s_funders.push(msg.sender);
+        s_addressToAmountFunded[msg.sender] += msg.value;
+        s_addressToContributionCount[msg.sender] += 1;
         emit FundReceived(msg.sender, msg.value);
     }
 
     function withdraw() public onlyOwner {
         // require(msg.sender == owner, "Only owner can withdraw the money.");
-        for (uint256 funderIndex = 0; funderIndex < funders.length; funderIndex++) {
-            address funder = funders[funderIndex];
-            addressToAmountFunded[funder] = 0;
+        for (uint256 funderIndex = 0; funderIndex < s_funders.length; funderIndex++) {
+            address funder = s_funders[funderIndex];
+            s_addressToAmountFunded[funder] = 0;
         }
 
-        funders = new address[](0);
+        s_funders = new address[](0);
 
         // Transfer
         // payable(msg.sender).transfer(address(this).balance);
@@ -110,7 +112,7 @@ contract FundMe {
     }
 
     function contributionCount(address funder) public view returns (uint256) {
-        return addressToContributionCount[funder];
+        return s_addressToContributionCount[funder];
     }
 
     function callAmountTo(address payable receiver) public payable {
@@ -124,7 +126,7 @@ contract FundMe {
     }
 
     function getFunder(uint256 index) public view returns (address) {
-        return funders[index];
+        return s_funders[index];
     }
 
     function getVersion() public view returns (uint256) {
@@ -137,6 +139,10 @@ contract FundMe {
 
     function getBalance() public view returns (uint256) {
         return address(this).balance;
+    }
+
+    function getAddressToAmountFunded(address funder) public view returns (uint256) {
+        return s_addressToAmountFunded[funder];
     }
 
     //Modifiers
@@ -153,6 +159,7 @@ contract FundMe {
         _;
     }
 
+    // receive and fallback
     receive() external payable {
         fund();
     }

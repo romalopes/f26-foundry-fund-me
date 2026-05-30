@@ -2909,6 +2909,664 @@ This pattern is essential for professional Solidity development workflows.
 
 # --#############################################
 
+# Refactoring Magic Numbers
+
+## What are Magic Numbers?
+
+Magic numbers are literal values hardcoded directly in the code without explanation. They cause:
+
+- **Reduced readability** — readers don't know what the number means
+- **Maintenance difficulty** — if the value appears in 10 places, you must update all 10
+- **Debugging challenges** — easy to miss one instance and introduce subtle bugs
+
+---
+
+## The Fix: Named Constants
+
+Open `HelperConfig.s.sol` and replace the magic numbers in `getAnvilEthConfig()` with named constants at the top of the contract:
+
+```solidity
+uint8 public constant DECIMALS = 8;
+int256 public constant INITIAL_PRICE = 2000e8;
+```
+
+> **Convention:** constants are always declared in `ALL_CAPS`.
+
+Then update `getAnvilEthConfig()` to use them:
+
+```solidity
+function getAnvilEthConfig() public returns (NetworkConfig memory) {
+    vm.startBroadcast();
+    mockPriceFeed = new MockV3Aggregator(DECIMALS, INITIAL_PRICE);
+    vm.stopBroadcast();
+
+    NetworkConfig memory anvilConfig = NetworkConfig({
+        priceFeed: address(mockPriceFeed)
+    });
+    return anvilConfig;
+}
+```
+
+Now the intent of each value is self-documenting, and any future change only needs to happen in one place.
+
+# Benefits of Refactoring Magic Numbers
+
+| Before                | After            |
+| --------------------- | ---------------- |
+| Hardcoded values      | Named constants  |
+| Difficult maintenance | Easy updates     |
+| Less readable         | Self-documenting |
+| Error-prone           | Safer            |
+| Harder audits         | Easier audits    |
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# Refactoring the Mock — Idempotent Deployment
+
+## The Problem
+
+Every time `getAnvilEthConfig()` is called it deploys a new `MockV3Aggregator`, even if one already exists. This wastes gas and can cause inconsistencies across tests.
+
+---
+
+## The Fix: Check Before Deploying
+
+Unassigned `address` state variables default to `address(0)`. Use this to skip deployment if a mock is already deployed:
+
+```solidity
+function getOrCreateAnvilEthConfig() public returns (NetworkConfig memory) {
+    // If priceFeed is already set, return the existing config
+    if (activeNetworkConfig.priceFeed != address(0)) {
+        return activeNetworkConfig;
+    }
+
+    vm.startBroadcast();
+    mockPriceFeed = new MockV3Aggregator(DECIMALS, INITIAL_PRICE);
+    vm.stopBroadcast();
+
+    NetworkConfig memory anvilConfig = NetworkConfig({
+        priceFeed: address(mockPriceFeed)
+    });
+    return anvilConfig;
+}
+```
+
+Also update the constructor to call the renamed function:
+
+```solidity
+constructor() {
+    if (block.chainid == 11155111) {
+        activeNetworkConfig = getSepoliaEthConfig();
+    } else {
+        activeNetworkConfig = getOrCreateAnvilEthConfig();
+    }
+}
+```
+
+---
+
+## The Rename
+
+`getAnvilEthConfig` → `getOrCreateAnvilEthConfig` better describes what the function actually does: it either retrieves the existing config or creates a new mock if none exists yet.
+
+---
+
+## Result: Network-Agnostic Tests
+
+```bash
+forge test                            # runs on Anvil with mock ✅
+forge test --fork-url $SEPOLIA_RPC_URL  # runs on Sepolia fork ✅
+```
+
+Both pass — no hardcoded addresses, no forced forking required.
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# Foundry Cheatcodes - Improving Test Coverage
+
+## Overview
+
+Cheatcodes are Foundry's superpower for testing — they let you alter EVM state, mock callers, set balances, and assert reverts. Read more in the [Foundry Book on cheatcodes](https://book.getfoundry.sh/forge/cheatcodes).
+
+After refactoring deployment scripts and making tests network-agnostic, the next goal is to improve test coverage.
+
+Check your current coverage:
+
+```bash
+forge coverage
+```
+
+Low coverage (e.g. 10–15%) means many contract behaviors remain untested.
+
+The `FundMe` contract's `fund()` function contains critical logic that should be verified through unit tests.
+
+This lesson introduces some of Foundry's most important testing tools:
+
+- `vm.expectRevert()`
+- `vm.prank()`
+- `vm.startPrank()`
+- `vm.stopPrank()`
+- `makeAddr()`
+- `vm.deal()`
+
+These are called **Cheatcodes**.
+
+---
+
+# What Are Foundry Cheatcodes?
+
+According to the Foundry Book:
+
+> "Cheatcodes give you powerful assertions, the ability to alter the state of the EVM, mock data, and more."
+
+Cheatcodes allow you to:
+
+- Simulate users
+- Assign balances
+- Expect failures
+- Modify blockchain state
+- Test edge cases
+
+They are essential for professional Solidity testing.
+
+---
+
+# Testing the fund() Function
+
+The `fund()` function should:
+
+### 1. Reject insufficient ETH
+
+```solidity
+require(
+    msg.value.getConversionRate(s_priceFeed) >= MINIMUM_USD
+);
+```
+
+If insufficient ETH is sent:
+
+```text
+Transaction should revert
+```
+
+---
+
+### 2. Update funded amount
+
+```solidity
+s_addressToAmountFunded[msg.sender] += msg.value;
+```
+
+---
+
+### 3. Add sender to funders array
+
+```solidity
+s_funders.push(msg.sender);
+```
+
+---
+
+# Cheatcode: expectRevert()
+
+Used to verify that a transaction fails.
+
+Example:
+
+```solidity
+function testFundFailsWithoutEnoughETH() public {
+    vm.expectRevert(); // Fund reverts without enough ETH
+    fundMe.fund();
+}
+```
+
+Explanation:
+
+```solidity
+vm.expectRevert();
+```
+
+or
+
+```solidity
+vm.expectRevert(bytes("didn't send enough eht"));
+```
+
+tells Foundry:
+
+> "The next transaction must revert."
+
+If it doesn't revert:
+
+```text
+Test fails
+```
+
+If it reverts:
+
+```text
+Test passes
+```
+
+---
+
+# User Simulation in Tests
+
+Real smart contracts interact with multiple users:
+
+- Owner
+- Admin
+- Minter
+- Investor
+- End User
+
+Testing requires simulating different callers.
+
+Foundry provides cheatcodes for this.
+
+---
+
+# Cheatcode: makeAddr()
+
+Creates a deterministic test address.
+
+```solidity
+address alice = makeAddr("alice");
+```
+
+Now we have:
+
+```text
+alice
+```
+
+as a reusable test user.
+
+---
+
+# Cheatcode: prank() - Fund updates the data structures
+
+Temporarily changes `msg.sender`.
+
+```solidity
+vm.prank(alice);
+```
+
+The next transaction executes as:
+
+```solidity
+alice
+```
+
+Example:
+
+```solidity
+uint256 constant SEND_VALUE = 0.1 ether;
+function testFundUpdatesFundDataStructure() public {
+    vm.prank(alice);                        // alice is msg.sender for the next call
+    fundMe.fund{value: SEND_VALUE}();
+    uint256 amountFunded = fundMe.getAddressToAmountFunded(alice);
+    assertEq(amountFunded, SEND_VALUE);
+}
+```
+
+Equivalent to:
+
+```text
+alice sends ETH
+```
+
+---
+
+# Cheatcodes: startPrank() / stopPrank()
+
+Apply a sender across multiple calls.
+
+```solidity
+vm.startPrank(alice);
+
+// multiple calls
+
+vm.stopPrank();
+```
+
+Everything between:
+
+```solidity
+startPrank()
+```
+
+and
+
+```solidity
+stopPrank()
+```
+
+uses the specified sender.
+
+Similar to:
+
+```solidity
+vm.startBroadcast()
+vm.stopBroadcast()
+```
+
+used in deployment scripts.
+
+---
+
+# Updated Test
+
+```solidity
+function testFundUpdatesFundDataStructure() public {
+    vm.prank(alice);
+
+    fundMe.fund{value: SEND_VALUE}();
+
+    uint256 amountFunded =
+        fundMe.getAddressToAmountFunded(alice);
+
+    assertEq(amountFunded, SEND_VALUE);
+}
+```
+
+---
+
+# Why It Still Fails
+
+Running:
+
+```bash
+forge test --mt testFundUpdatesFundDataStructure -vvv
+```
+
+produces:
+
+```text
+EvmError: OutOfFunds
+```
+
+Trace:
+
+```text
+FundMe::fund{value: 100000000000000000}()
+└─ ← [OutOfFunds]
+```
+
+Problem:
+
+```text
+alice has zero ETH
+```
+
+A user cannot fund a contract without a balance.
+
+---
+
+# Cheatcode: deal()
+
+Assigns ETH to an address.
+
+Example:
+
+```solidity
+vm.deal(alice, STARTING_BALANCE);
+```
+
+---
+
+# Create Starting Balance Constant
+
+```solidity
+uint256 constant STARTING_BALANCE = 10 ether;
+```
+
+---
+
+# Setup Function
+
+```solidity
+function setUp() external {
+    vm.deal(alice, STARTING_BALANCE);
+}
+```
+
+Now:
+
+```text
+alice owns 10 ETH
+```
+
+during tests.
+
+---
+
+# Final Working Test
+
+```solidity
+function testFundUpdatesFundDataStructure() public {
+    vm.prank(alice);
+
+    fundMe.fund{value: SEND_VALUE}();
+
+    uint256 amountFunded =
+        fundMe.getAddressToAmountFunded(alice);
+
+    assertEq(amountFunded, SEND_VALUE);
+}
+```
+
+This test now passes.
+
+---
+
+# Common Testing Workflow
+
+A very common pattern in Solidity testing:
+
+```solidity
+address alice = makeAddr("alice");
+
+vm.deal(alice, 10 ether);
+
+vm.prank(alice);
+
+contract.call();
+```
+
+Steps:
+
+1. Create user
+2. Fund user
+3. Impersonate user
+4. Execute transaction
+5. Verify state
+
+You will use this pattern constantly.
+
+---
+
+# Most Important Cheatcodes
+
+## expectRevert
+
+Expect next transaction to fail.
+
+```solidity
+vm.expectRevert();
+```
+
+---
+
+## prank
+
+Change sender for next call.
+
+```solidity
+vm.prank(alice);
+```
+
+---
+
+## startPrank
+
+Change sender for multiple calls.
+
+```solidity
+vm.startPrank(alice);
+```
+
+---
+
+## stopPrank
+
+End sender impersonation.
+
+```solidity
+vm.stopPrank();
+```
+
+---
+
+## makeAddr
+
+Create test addresses.
+
+```solidity
+address alice = makeAddr("alice");
+```
+
+---
+
+## deal
+
+Assign ETH balance.
+
+```solidity
+vm.deal(alice, 10 ether);
+```
+
+---
+
+# Useful Commands
+
+Run all tests:
+
+```bash
+forge test
+```
+
+Run a specific test:
+
+```bash
+forge test --mt testFundUpdatesFundDataStructure
+```
+
+Verbose traces:
+
+```bash
+forge test --mt testFundUpdatesFundDataStructure -vvv
+```
+
+Coverage report:
+
+```bash
+forge coverage
+```
+
+---
+
+# Key Concepts Learned
+
+## Cheatcodes
+
+Powerful Foundry testing utilities that manipulate EVM state.
+
+---
+
+## User Simulation
+
+Testing should represent real users interacting with contracts.
+
+---
+
+## Balance Management
+
+Users must possess ETH before sending transactions.
+
+---
+
+## State Verification
+
+Tests should verify:
+
+- Reverts
+- Storage updates
+- Array updates
+- Balance changes
+
+---
+
+## Test Readability
+
+Use constants instead of magic numbers:
+
+```solidity
+SEND_VALUE
+STARTING_BALANCE
+```
+
+---
+
+# Takeaway
+
+Foundry Cheatcodes are one of the framework's most powerful features. By combining:
+
+- `makeAddr()`
+- `deal()`
+- `prank()`
+- `expectRevert()`
+
+you can accurately simulate real-world user interactions, test failure scenarios, verify state changes, and dramatically increase your smart contract test coverage.
+
+These cheatcodes form the foundation of nearly every professional Solidity testing suite.
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
+# ------------------------------------------------
+
+```
+
+```
+
+# --#############################################
+
 # ------------------------------------------------
 
 ```
