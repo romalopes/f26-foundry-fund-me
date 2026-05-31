@@ -20,6 +20,19 @@ contract InteractionsTest is Test {
         vm.deal(alice, STARTING_USER_BALANCE);
     }
 
+    function testUserCanFundInteractions() public {
+        FundFundMe fundFundMe = new FundFundMe();
+        //  vm.prank(USER); // Start a prank as USER
+        vm.deal(alice, 1e18); // Give USER 0.01 ether
+        fundFundMe.fundFundMe(address(fundMe));
+        //  assertEq(address(fundMe).balance, 0.01 ether);
+        console.log("Funded FundMe contract at address: %s", address(fundMe));
+        console.log("Current balance: %s", address(fundMe).balance);
+
+        WithdrawFundMe withdrawFundMe = new WithdrawFundMe();
+        withdrawFundMe.withdrawFundMe(address(fundMe));
+    }
+
     function testUserCanFundAndOwnerWithdraw() public {
         uint256 preUserBalance = address(alice).balance;
         uint256 preOwnerBalance = address(fundMe.getOwner()).balance;

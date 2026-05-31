@@ -5793,6 +5793,11 @@ Run a specific test:
 forge test \
 --mt testUserCanFundAndOwnerWithdraw \
 -vv
+
+forge test \
+--mt testUserCanFundInteractions \
+-vv
+
 ```
 
 Expected output:
@@ -5840,6 +5845,12 @@ If `foundry-devops` fails to build due to a deprecated `vm.keyExists`:
 
 ```bash
 forge update --force
+```
+
+## Call script
+
+```solidity
+forge script script/Interactions.s.sol:FundFundMe
 ```
 
 ---

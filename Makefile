@@ -4,6 +4,7 @@ PRIVATE_KEY ?= BRAVE_METAMASK_PRIVATE_KEY_1
 # NETWORK ?= ALCHEMY_ETH_SEPOLIA
 NETWORK ?= ANVIL
 SIMPLE_STORAGE_CONTRACT_ADDRESS ?= $(NETWORK)_SIMPLE_STORAGE_CONTRACT_ADDRESS
+SCRIPT ?= DeployFundMe.s.sol
 
 echo_params:
 	@echo "PRIVATE_KEY: $(PRIVATE_KEY)"
@@ -16,11 +17,11 @@ build:
 test:
 	forge test -vvv
 
-
+# make deploy-general SCRIPT=Interactions.s.sol:FundFundMe
 
 # GENERAL
 deploy-general:
-	forge script script/DeploySimpleStorage.s.sol \
+	forge script script/$(SCRIPT) \
 		--rpc-url $($(NETWORK)_RPC_URL) \
 		--private-key $($(PRIVATE_KEY)) \
 		--broadcast
@@ -43,7 +44,7 @@ verify-general:
 
 # ANVIL
 deploy-anvil:
-	forge script script/DeploySimpleStorage.s.sol \
+	forge script script/DeployFundMe.s.sol \
 		--rpc-url ${ANVIL_RPC_URL} \
 		--private-key ${ANVIL_PRIVATE_KEY_1} \
 		--broadcast
@@ -64,7 +65,7 @@ verify-anvil:
 
 # ANVIL ZKSYNC
 deploy-anvil-zksync:
-	forge script script/DeploySimpleStorage.s.sol \
+	forge script script/DeployFundMe.s.sol \
 		--zksync \
 		--rpc-url ${ANVIL_ZKSYNC_RPC_URL} \
 		--private-key ${ANVIL_ZKSYNC_PRIVATE_KEY_1} \
@@ -89,14 +90,14 @@ verify-anvil-zksync:
 
 	# ALCHEMY SEPOLIA
 deploy-alchemy-eth-sepolia:
-	forge script script/DeploySimpleStorage.s.sol \
+	forge script script/DeployFundMe.s.sol \
 		--rpc-url ${ALCHEMY_ETH_SEPOLIA_RPC_URL} \
 		--private-key ${BRAVE_METAMASK_PRIVATE_KEY_1} \
 		--broadcast
 verify-alchemy-eth-sepolia:
 	forge verify-contract \
 		$(ALCHEMY_ETH_SEPOLIA_SIMPLE_STORAGE_CONTRACT_ADDRESS) \
-		src/DeploySimpleStorage.s.sol \
+		src/DeployFundMe.s.sol \
 		$(ETHERSCAN_API_KEY)
 
 verify-2-alchemy-eth-sepolia:
@@ -121,7 +122,7 @@ read-alchemy-eth-sepolia:
 
 # INFURA SEPOLIA
 deploy-infura-eth-sepolia:
-	forge script script/DeploySimpleStorage.s.sol \
+	forge script script/DeployFundMe.s.sol \
 		--rpc-url ${INFURA_ETH_SEPOLIA_RPC_URL} \
 		--private-key ${BRAVE_METAMASK_PRIVATE_KEY_1} \
 		--broadcast
@@ -142,7 +143,7 @@ verify-infura-eth-sepolia:
 
 # TENDERLY SEPOLIA
 deploy-tenderly-eth-sepolia:
-	forge script script/DeploySimpleStorage.s.sol \
+	forge script script/DeployFundMe.s.sol \
 		--rpc-url ${TENDERLY_ETH_SEPOLIA_RPC_URL} \
 		--private-key ${BRAVE_METAMASK_PRIVATE_KEY_1} \
 		--broadcast
@@ -173,7 +174,7 @@ verify-tenderly-eth-sepolia:
 
 # CHAINSTACK SEPOLIA
 deploy-chainstack-sepolia:
-	forge script script/DeploySimpleStorage.s.sol \
+	forge script script/DeployFundMe.s.sol \
 		--rpc-url ${CHAINSTACK_SEPOLIA_RPC_URL} \
 		--private-key ${BRAVE_METAMASK_PRIVATE_KEY_1} \
 		--broadcast
@@ -194,7 +195,7 @@ verify-chainstack-sepolia:
 
 # NODIES SEPOLIA
 deploy-nodies-sepolia:
-	forge script script/DeploySimpleStorage.s.sol \
+	forge script script/DeployFundMe.s.sol \
 		--rpc-url ${NODIES_SEPOLIA_RPC_URL} \
 		--private-key ${BRAVE_METAMASK_PRIVATE_KEY_1} \
 		--broadcast
@@ -215,7 +216,7 @@ verify-nodies-sepolia:
 
 # POLYGON AMOY ALCHEMY
 deploy-polygon-amoy-alchemy:
-	forge script script/DeploySimpleStorage.s.sol \
+	forge script script/DeployFundMe.s.sol \
 		--rpc-url ${POLYGON_AMOY_ALCHEMY_RPC_URL} \
 		--private-key ${BRAVE_METAMASK_PRIVATE_KEY_1} \
 		--broadcast
@@ -236,7 +237,7 @@ verify-polygon-amoy-alchemy:
 
 # ZKSYNC SEPOLIA ALCHEMY
 deploy-zksync-sepolia-alchemy:
-	forge script script/DeploySimpleStorage.s.sol \
+	forge script script/DeployFundMe.s.sol \
 		--rpc-url ${ZKSYNC_ALCHEMY_SEPOLIA_RPC_URL} \
 		--private-key ${BRAVE_METAMASK_PRIVATE_KEY_1} \
 		--broadcast
@@ -260,7 +261,7 @@ verify-zksync-sepolia-alchemy:
 
 # OPTIMISM SEPOLIA ALCHEMY
 deploy-optimism-sepolia-alchemy:
-	forge script script/DeploySimpleStorage.s.sol \
+	forge script script/DeployFundMe.s.sol \
 		--rpc-url ${OPTIMISM_ALCHEMY_SEPOLIA_RPC_URL} \
 		--private-key ${BRAVE_METAMASK_PRIVATE_KEY_1} \
 		--broadcast
@@ -281,7 +282,7 @@ verify-optimism-sepolia-alchemy:
 
 # ARBITRUM SEPOLIA ALCHEMY
 deploy-arbitrum-sepolia-alchemy:
-	forge script script/DeploySimpleStorage.s.sol \
+	forge script script/DeployFundMe.s.sol \
 		--rpc-url ${ARBITRUM_ALCHEMY_SEPOLIA_RPC_URL} \
 		--private-key ${BRAVE_METAMASK_PRIVATE_KEY_1} \
 		--broadcast
@@ -302,7 +303,7 @@ verify-arbitrum-sepolia-alchemy:
 
 # BASE SEPOLIA ALCHEMY
 deploy-base-sepolia-alchemy:
-	forge script script/DeploySimpleStorage.s.sol \
+	forge script script/DeployFundMe.s.sol \
 		--rpc-url ${BASE_ALCHEMY_SEPOLIA_RPC_URL} \
 		--private-key ${BRAVE_METAMASK_PRIVATE_KEY_1} \
 		--broadcast
